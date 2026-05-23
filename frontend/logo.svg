@@ -1,0 +1,150 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <!-- Warm ivory marble -->
+    <linearGradient id="marble" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fefcf9"/>
+      <stop offset="35%" stop-color="#f5efe6"/>
+      <stop offset="70%" stop-color="#ede4d8"/>
+      <stop offset="100%" stop-color="#e2d8c8"/>
+    </linearGradient>
+    <!-- Hair gradient -->
+    <linearGradient id="hair" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#8b7355"/>
+      <stop offset="100%" stop-color="#6b5a45"/>
+    </linearGradient>
+    <!-- Pedestal gradient -->
+    <linearGradient id="pedestal" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#d4c9b8"/>
+      <stop offset="100%" stop-color="#bfb3a0"/>
+    </linearGradient>
+    <!-- Shadow -->
+    <filter id="shadow" x="-15%" y="-15%" width="130%" height="130%">
+      <feDropShadow dx="1" dy="2" stdDeviation="3" flood-color="#2d2540" flood-opacity="0.18"/>
+    </filter>
+    <!-- Glow for AI nodes -->
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="2" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <!-- Figure inner light -->
+    <filter id="figureLight" x="-5%" y="-5%" width="110%" height="110%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="3" result="blur"/>
+      <feOffset in="blur" dx="0" dy="0"/>
+      <feComposite in2="SourceAlpha" operator="arithmetic" k2="-1" k3="1"/>
+      <feFlood flood-color="#f5efe6" flood-opacity="0.2"/>
+      <feComposite operator="in" in2="SourceAlpha"/>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Open design, no circle border -->
+
+  <!-- Pedestal - warm stone -->
+  <g filter="url(#shadow)">
+    <rect x="68" y="152" width="64" height="5" rx="1.5" fill="#d4c9b8"/>
+    <rect x="71" y="149" width="58" height="4" rx="1" fill="#e0d6c6"/>
+    <rect x="73" y="157" width="54" height="38" rx="1" fill="url(#pedestal)"/>
+    <!-- Fluting -->
+    <line x1="79" y1="157" x2="79" y2="193" stroke="#c4b8a4" stroke-width="0.6" opacity="0.5"/>
+    <line x1="87" y1="157" x2="87" y2="193" stroke="#c4b8a4" stroke-width="0.6" opacity="0.5"/>
+    <line x1="95" y1="157" x2="95" y2="193" stroke="#c4b8a4" stroke-width="0.6" opacity="0.5"/>
+    <line x1="103" y1="157" x2="103" y2="193" stroke="#c4b8a4" stroke-width="0.6" opacity="0.5"/>
+    <line x1="111" y1="157" x2="111" y2="193" stroke="#c4b8a4" stroke-width="0.6" opacity="0.5"/>
+    <line x1="119" y1="157" x2="119" y2="193" stroke="#c4b8a4" stroke-width="0.6" opacity="0.5"/>
+    <rect x="71" y="193" width="58" height="4" rx="1" fill="#d4c9b8"/>
+    <rect x="68" y="196" width="64" height="3" rx="1" fill="#c4b8a4"/>
+  </g>
+
+  <!-- Neck -->
+  <path d="M90,150 Q90,142 89,136 L111,136 Q110,142 110,150 Z" fill="url(#marble)" filter="url(#figureLight)"/>
+
+  <!-- Head -->
+  <g filter="url(#shadow)">
+    <!-- Cranium -->
+    <ellipse cx="100" cy="92" rx="30" ry="37" fill="url(#marble)"/>
+    <!-- Face -->
+    <path d="M86,72 Q80,78 78,88 Q76,98 78,108 Q80,116 86,122 Q90,126 95,128 L100,130 Q108,130 114,126 Q120,120 122,110 Q124,100 122,90 Q120,80 114,75 Q108,70 100,69 Z" fill="url(#marble)"/>
+    <!-- Brow -->
+    <path d="M84,80 Q88,76 100,75 Q112,76 116,80 Q114,78 100,77 Q86,78 84,80 Z" fill="#e8dfd2"/>
+    <!-- Nose -->
+    <path d="M110,86 Q114,88 116,94 Q117,98 115,102 Q113,104 110,103 Q108,102 108,98 Q108,94 110,90 Z" fill="#e8dfd2"/>
+    <!-- Lips -->
+    <path d="M97,112 Q102,110 108,111 Q112,112 110,115 Q106,117 102,116 Q98,115 97,112 Z" fill="#d8cfc0"/>
+    <!-- Chin -->
+    <path d="M95,120 Q100,124 108,122 Q106,126 100,126 Q94,126 92,122 Z" fill="#e2d8c8"/>
+    <!-- Hair -->
+    <path d="M73,76 Q70,64 76,52 Q82,42 92,38 Q102,36 112,38 Q122,42 128,52 Q134,64 132,76 Q130,70 125,66 Q120,62 115,60 Q110,58 105,58 Q95,58 88,62 Q82,66 76,72 Z" fill="url(#hair)"/>
+    <!-- Hair waves -->
+    <path d="M78,56 Q82,50 90,46" stroke="#7a6548" stroke-width="0.7" fill="none" opacity="0.4"/>
+    <path d="M82,60 Q86,54 92,50" stroke="#7a6548" stroke-width="0.7" fill="none" opacity="0.4"/>
+    <path d="M85,64 Q88,58 94,54" stroke="#7a6548" stroke-width="0.7" fill="none" opacity="0.4"/>
+    <path d="M112,46 Q118,50 124,58" stroke="#7a6548" stroke-width="0.7" fill="none" opacity="0.4"/>
+    <path d="M116,50 Q122,54 126,62" stroke="#7a6548" stroke-width="0.7" fill="none" opacity="0.4"/>
+    <!-- Ear -->
+    <path d="M74,90 Q70,93 71,98 Q72,103 76,102" stroke="#d8cfc0" stroke-width="1.5" fill="none"/>
+  </g>
+
+  <!-- AI circuit - refined teal/blue-green accents -->
+  <g stroke="#2ca5a0" stroke-width="0.9" fill="none" opacity="0.6" filter="url(#glow)">
+    <!-- Forehead circuits -->
+    <path d="M88,66 L93,63 L100,65 L106,62"/>
+    <path d="M100,65 L100,70"/>
+    <path d="M93,63 L93,68"/>
+    <!-- Temple -->
+    <path d="M80,80 L76,84 L74,90"/>
+    <path d="M76,84 L80,88"/>
+    <!-- Crown -->
+    <path d="M90,50 L96,46 L104,48 L110,46"/>
+  </g>
+
+  <!-- AI nodes - teal accent -->
+  <g filter="url(#glow)">
+    <circle cx="88" cy="66" r="2" fill="#2ca5a0" opacity="0.65"/>
+    <circle cx="100" cy="65" r="2.3" fill="#2ca5a0" opacity="0.75"/>
+    <circle cx="106" cy="62" r="1.6" fill="#2ca5a0" opacity="0.55"/>
+    <circle cx="93" cy="63" r="1.6" fill="#2ca5a0" opacity="0.55"/>
+    <circle cx="96" cy="46" r="1.5" fill="#2ca5a0" opacity="0.5"/>
+    <circle cx="80" cy="80" r="1.5" fill="#2ca5a0" opacity="0.5"/>
+    <circle cx="74" cy="90" r="1.5" fill="#2ca5a0" opacity="0.5"/>
+  </g>
+
+  <!-- Eye -->
+  <g filter="url(#glow)">
+    <ellipse cx="104" cy="88" rx="5" ry="3.5" fill="#4a3f35" opacity="0.5"/>
+    <ellipse cx="104" cy="88" rx="2.5" ry="2.5" fill="#2ca5a0" opacity="0.45"/>
+    <circle cx="104" cy="88" r="1" fill="#fff" opacity="0.6"/>
+  </g>
+
+  <!-- Floating particles -->
+  <g opacity="0.3">
+    <circle cx="48" cy="38" r="1.2" fill="#2ca5a0">
+      <animate attributeName="opacity" values="0.1;0.5;0.1" dur="3s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="155" cy="32" r="1" fill="#2ca5a0">
+      <animate attributeName="opacity" values="0.15;0.5;0.15" dur="2.5s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="42" cy="108" r="0.9" fill="#2ca5a0">
+      <animate attributeName="opacity" values="0.1;0.4;0.1" dur="4s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="158" cy="102" r="1.1" fill="#2ca5a0">
+      <animate attributeName="opacity" values="0.1;0.45;0.1" dur="3.5s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="58" cy="26" r="0.8" fill="#2ca5a0">
+      <animate attributeName="opacity" values="0.1;0.55;0.1" dur="2.8s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="142" cy="22" r="0.9" fill="#2ca5a0">
+      <animate attributeName="opacity" values="0.12;0.48;0.12" dur="3.2s" repeatCount="indefinite"/>
+    </circle>
+  </g>
+
+  <!-- Bottom label -->
+  <text x="100" y="198" text-anchor="middle"
+        font-family="'Segoe UI', system-ui, sans-serif" font-weight="600" font-size="10"
+        fill="#8b7355" letter-spacing="4">RAGENT</text>
+</svg>

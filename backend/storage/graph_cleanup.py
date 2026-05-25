@@ -1,5 +1,5 @@
 """Neo4j 图清理：移除失效 chunk 引用、回收孤立节点。"""
-from backend.storage.graph_client import run_cypher, write_cypher
+from backend.storage.graph_client import run_cypher
 
 
 def strip_chunk_from_edges(chunk_ids: list[str]) -> dict:
@@ -22,8 +22,8 @@ def remove_empty_edges() -> int:
     DELETE r
     RETURN count(r) AS deleted
     """
-    records = write_cypher(cypher)
-    return records.get("relationships_created", 0)
+    records = run_cypher(cypher)
+    return records[0]["deleted"] if records else 0
 
 
 def remove_orphan_entities() -> int:
@@ -34,8 +34,8 @@ def remove_orphan_entities() -> int:
     DELETE e
     RETURN count(e) AS deleted
     """
-    records = write_cypher(cypher)
-    return records.get("nodes_created", 0)
+    records = run_cypher(cypher)
+    return records[0]["deleted"] if records else 0
 
 
 def full_cascade_cleanup(chunk_ids: list[str]) -> dict:

@@ -159,7 +159,32 @@ class DocumentLoader:
 
         if file_lower.endswith(".pdf"):
             doc_type = "PDF"
-            loader = PyPDFLoader(file_path)
+            # --- v7.0 版面分析 ---
+            from backend.documents.layout_analyzer import analyze_pdf_layout, is_visual_element
+            elements = analyze_pdf_layout(file_path)
+            text_blocks = [e for e in elements if not is_visual_element(e["type"])]
+            media_elements = [e for e in elements if is_visual_element(e["type"])]
+
+            raw_docs = [Document(page_content=e["text"], metadata={
+                "page": e.get("page_number", 0),
+                "element_type": e["type"],
+            }) for e in text_blocks if e.get("text", "").strip()]
+
+            documents = self._split_raw_docs(raw_docs, filename, doc_type)
+            for d in documents:
+                d["file_path"] = file_path
+
+            # 图片/表格：提取上传
+            if media_elements:
+                try:
+                    from backend.documents.media_extractor import extract_and_upload
+                    media_chunks = extract_and_upload(file_path, media_elements, filename)
+                    documents.extend(media_chunks)
+                except Exception as e:
+                    print(f"[WARN] Media extraction failed: {e}")
+
+            print(f"[INFO] 最终生成分块总数: {len(documents)} (含{len(media_elements)}个图表)")
+            return documents
         elif file_lower.endswith((".docx", ".doc")):
             doc_type = "Word"
             loader = Docx2txtLoader(file_path)

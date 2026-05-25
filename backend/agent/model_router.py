@@ -9,7 +9,7 @@ BASE_URL = os.getenv("BASE_URL")
 API_KEY = os.getenv("ARK_API_KEY")
 
 ROUTE_MAP = {
-    "supervisor": MODEL_TURBO,
+    "supervisor": MODEL_PLUS,   # Supervisor needs structured output — turbo is too weak
     "direct_answer": MODEL_TURBO,
     "web_searcher": MODEL_PLUS,
     "rag_specialist": MODEL_PLUS,
@@ -23,12 +23,16 @@ ROUTE_MAP = {
 
 def get_model_for_agent(agent_name: str):
     """根据 Agent 角色获取对应模型实例。"""
+    from langchain.chat_models import init_chat_model
     model_name = ROUTE_MAP.get(agent_name, MODEL_PLUS)
-    return ChatOpenAI(
+    return init_chat_model(
         model=model_name,
+        model_provider="openai",
         api_key=API_KEY,
         base_url=BASE_URL,
         temperature=0.0,
+        max_tokens=8192,
+        timeout=120,
     )
 
 

@@ -131,7 +131,7 @@ SUPERVISOR_SYSTEM_PROMPT = """你是一个智能路由调度员。你的职责�
 
 ### web_searcher（联网搜索专家）
 当用户问题涉及以下内容时路由至此：
-- 实时新闻、最新动态、时事
+- 天气查询、实时新闻、最新动态、股价、实时信息（必须联网搜索）
 - 需要联网获取的实时信息（股价、赛事、天气预报等）
 - 知识库不太可能覆盖的通用常识或最新信息
 
@@ -157,7 +157,7 @@ SUPERVISOR_SYSTEM_PROMPT = """你是一个智能路由调度员。你的职责�
 如果用户问题涉及时间跨度（如"去年"、"2023年到2025年"、"最近"、"最新的"、"X年的"），设置 is_temporal=true 并提取 temporal_year，优先路由到 local_graph_search。
 
 ## 注意事项
-- 如果不确定，优先选择 rag_specialist
+- 实时信息（天气、新闻、股价）必须选 web_searcher，不要选 direct_answer
 - 大多数情况选择一个路由即可
 - 当问题需要知识库+联网信息互补时，可同时选择多个（如 rag_specialist + web_searcher）
 - 不要同时选择 direct_answer 和其他 Worker
@@ -236,26 +236,37 @@ def supervisor_node(state: SupervisorState) -> dict:
                 user_query = msg.content
                 break
 
-    # 调用 Supervisor LLM 进行路由决策
-    model = _get_supervisor_model().with_structured_output(SupervisorRoute)
-
-    route_messages = [
-        SystemMessage(content=SUPERVISOR_SYSTEM_PROMPT),
-        HumanMessage(content=f"用户问题：{user_query}"),
-    ]
+    # 调用 Supervisor LLM 进行路由决策（手动 JSON 解析）
+    import re
+    model = _get_supervisor_model()
+    route_prompt = SUPERVISOR_SYSTEM_PROMPT + (
+        '\n\n请严格输出JSON格式，不要包含其他内容：\n'
+        '{"routes": ["agent_name"], "reason": "选择原因"}\n'
+        f'\n用户问题：{user_query}'
+    )
 
     try:
-        decision = model.invoke(route_messages)
-        routes = decision.routes
-        reason = decision.reason
-        is_temporal = getattr(decision, "is_temporal", False) or False
-        temporal_year = getattr(decision, "temporal_year", "") or ""
-        # 确保总是列表
+        response = model.invoke([HumanMessage(content=route_prompt)])
+        content = response.content if hasattr(response, "content") else str(response)
+        json_match = re.search(r'\{[^{}]*"routes"\s*:\s*\[[^\]]*\][^{}]*\}', content, re.DOTALL)
+        if json_match:
+            data = json.loads(json_match.group())
+            routes = data.get("routes", ["rag_specialist"])
+            reason = data.get("reason", "")
+            is_temporal = data.get("is_temporal", False)
+            temporal_year = data.get("temporal_year", "")
+        else:
+            content_lower = content.lower()
+            if "web_search" in content_lower or "联网" in content_lower:
+                routes = ["web_searcher"]; reason = "联网搜索"
+            else:
+                routes = ["rag_specialist"]; reason = "路由解析失败"
+            is_temporal = False; temporal_year = ""
         if isinstance(routes, str):
             routes = [routes]
     except Exception:
         routes = ["rag_specialist"]
-        reason = "路由解析失败，默认使用知识库检索"
+        reason = "路由解析失败，默认知识库检索"
         is_temporal = False
         temporal_year = ""
 

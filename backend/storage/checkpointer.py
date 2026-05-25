@@ -327,4 +327,4 @@ class MySQLSaver(BaseCheckpointSaver):
             .order_by(GraphCheckpointWrite.idx)
             .all()
         )
-        return [(row.channel, row.value) for row in rows]
+        return [(row.task_id, row.channel, row.value) for row in rows]

@@ -42,6 +42,7 @@ class MilvusManager:
             schema.add_field("page_number", DataType.INT64)
             schema.add_field("chunk_idx", DataType.INT64)
             schema.add_field("chunk_id", DataType.VARCHAR, max_length=512)
+            schema.add_field("is_deleted", DataType.BOOL)
 
             index_params = client.prepare_index_params()
             index_params.add_index(field_name="dense_embedding", index_type="HNSW", metric_type="IP")

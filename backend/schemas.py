@@ -3,7 +3,7 @@
 定义聊天、会话、文档管理相关的请求/响应数据结构。
 """
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Literal, Optional, List
 
 class ChatRequest(BaseModel):
     message: str
@@ -55,6 +55,7 @@ class RagTrace(BaseModel):
 class ChatResponse(BaseModel):
     response: str
     rag_trace: Optional[RagTrace] = None
+    agent_trace: Optional[dict] = None
 
 
 class MessageInfo(BaseModel):
@@ -62,6 +63,7 @@ class MessageInfo(BaseModel):
     content: str
     timestamp: str
     rag_trace: Optional[RagTrace] = None
+    agent_trace: Optional[dict] = None
 
 
 class SessionMessagesResponse(BaseModel):
@@ -103,5 +105,41 @@ class DocumentUploadResponse(BaseModel):
 
 class DocumentDeleteResponse(BaseModel):
     filename: str
-    chunks_deleted: int
-    message: str
+    status: str
+    affected_chunks: int
+    milvus_deleted: int
+    graph_edges_updated: int
+    graph_empty_edges_deleted: int
+    graph_orphan_nodes_deleted: int
+
+
+class DocumentStatus(BaseModel):
+    filename: str
+    is_deleted: bool
+    version: int
+    chunk_count: int
+    updated_at: str
+
+
+class HitlResumeRequest(BaseModel):
+    """HITL 中断恢复请求。"""
+    session_id: str
+    action: Literal["approve", "reject", "modify"]
+    modified_input: Optional[str] = None
+
+
+class GraphEntity(BaseModel):
+    """知识图谱实体节点。"""
+    name: str
+    type: str
+    description: str = ""
+
+
+class GraphRelation(BaseModel):
+    """知识图谱关系边。"""
+    subject: str
+    predicate: str
+    object: str
+    description: str = ""
+    weight: float = 0.5
+    source_chunks: list[str] = []

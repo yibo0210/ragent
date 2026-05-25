@@ -292,6 +292,16 @@ Neo4j Full Graph
 | **Exponential Backoff Retry** | tenacity-based retry on network jitter: 3 attempts with 1s→2s→4s wait for LLM generation and Milvus writes |
 | **Monitoring Stack** | Docker Compose includes Jaeger (:16686), Prometheus (:9090), and Grafana (:3000) — one command to start the full observability suite |
 
+### Cost Optimization (v6.0)
+
+| Feature | Description |
+|---------|-------------|
+| **Semantic Cache** | Milvus semantic_cache_collection + MySQL query_cache_store; cosine ≥ 0.95 → skip RAG+LLM, return cached response in ~200ms with 0 Token cost |
+| **Dynamic Model Routing** | qwen-turbo for lightweight tasks (Supervisor, Direct Answer); qwen-plus/max for heavy reasoning (Data Analyst, Graph Search) |
+| **Cache Singleflight** | Redis-based deduplication lock: 10 concurrent identical queries → only 1 penetrates to LLM, remaining 9 share cached result |
+| **Cache Invalidation** | Document soft-delete triggers automatic cache eviction; TTL-based expiration for stale entries |
+| **Benchmark Script** | `scripts/run_benchmark.py` — concurrent stress test comparing cache hit/miss latency and Token savings |
+
 ---
 
 ## Tech Stack
@@ -344,6 +354,10 @@ Neo4j Full Graph
 <tr>
 <td><strong>High Availability</strong></td>
 <td>pybreaker · tenacity · Neo4j query timeout (v5.0)</td>
+</tr>
+<tr>
+<td><strong>Cost Optimization</strong></td>
+<td>Semantic Cache (Milvus ANN) · Dynamic Model Routing (v6.0)</td>
 </tr>
 <tr>
 <td><strong>Infrastructure</strong></td>
@@ -407,13 +421,19 @@ Ragent-AI/
 │   │   ├── circuit_breaker.py  # Circuit breaker state machine
 │   │   ├── retry.py            # Exponential backoff retry decorator
 │   │   └── degradation.py      # Neo4j timeout → Dense+Sparse fallback
+│   ├── cache/                  # Semantic cache layer (v6.0)
+│   │   ├── __init__.py
+│   │   ├── semantic_cache.py   # Milvus ANN + cosine + MySQL store
+│   │   ├── singleflight.py     # Redis Singleflight anti-stampede
+│   │   └── invalidation.py     # Document delete → cache eviction
 │   └── schemas.py              # Pydantic request/response models + GraphEntity/GraphRelation
 │
 ├── scripts/
 │   ├── run_community_clustering.py  # Offline: build graph → cluster → summarize → index
 │   ├── run_entity_resolution.py    # Offline: entity dedup pipeline (v4.0)
 │   ├── run_evaluation.py           # Automated RAG eval + charts (v4.0)
-│   └── grid_search_rrf.py          # RRF weight optimization (v4.0)
+│   ├── grid_search_rrf.py          # RRF weight optimization (v4.0)
+│   └── run_benchmark.py            # Concurrent cache benchmark (v6.0)
 │
 ├── frontend/
 │   ├── index.html              # Vue 3 SPA (chat, trace canvas, HITL modal, settings)
@@ -614,6 +634,10 @@ This will:
 | `LOG_LEVEL` | `INFO` | Log level: DEBUG / INFO / WARNING (v5.0) |
 | `LOG_FORMAT` | `json` | Log format: json / console (v5.0) |
 | `NEO4J_QUERY_TIMEOUT` | `1.5` | Neo4j Cypher query timeout in seconds (v5.0) |
+| `CACHE_SIMILARITY_THRESHOLD` | `0.95` | Semantic cache cosine similarity threshold (v6.0) |
+| `CACHE_TTL_SECONDS` | `86400` | Cache entry TTL in seconds (v6.0) |
+| `MODEL_TURBO` | `qwen-turbo` | Lightweight task model (v6.0) |
+| `MODEL_MAX` | `qwen-max` | Heavy reasoning model (v6.0) |
 
 ### Chunking Parameters
 
@@ -743,7 +767,16 @@ This will:
 - [x] Docker Compose monitoring stack (Jaeger + Prometheus + Grafana)
 - [x] Grafana pre-configured with Prometheus data source
 
-### v5.x — Planned
+### v6.0 — Cost & Latency Optimization ✓
+
+- [x] Semantic cache layer (Milvus ANN + MySQL store, cosine ≥ 0.95 threshold)
+- [x] Dynamic model routing (qwen-turbo for lightweight, qwen-plus/max for heavy)
+- [x] Redis Singleflight cache stampede protection
+- [x] Event-driven cache invalidation on document soft-delete
+- [x] TTL-based cache expiration
+- [x] Concurrent benchmark script (cache hit/miss latency + Token comparison)
+
+### v6.x — Planned
 
 - [ ] Editable session names in sidebar
 - [ ] HITL state recovery on page refresh (polling endpoint)

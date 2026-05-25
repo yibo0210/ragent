@@ -126,6 +126,11 @@ NetworkX · python-louvain
 | `backend/ha/retry.py` | tenacity exponential backoff retry decorator |
 | `backend/ha/degradation.py` | Neo4j timeout → Dense+Sparse fallback |
 | `prometheus.yml` | Prometheus scrape config (targets app :8000) |
+| `backend/cache/semantic_cache.py` | Milvus ANN + cosine + MySQL semantic cache |
+| `backend/cache/singleflight.py` | Redis singleflight anti-stampede |
+| `backend/cache/invalidation.py` | Doc delete → cache eviction |
+| `backend/agent/model_router.py` | Dynamic LLM routing: turbo/plus/max by task |
+| `scripts/run_benchmark.py` | Concurrent cache benchmark |
 | `frontend/script.js` | Vue 3: SSE handler, trace panel, HITL modal |
 
 ### Patterns
@@ -149,3 +154,6 @@ NetworkX · python-louvain
 - **Circuit breaker**: `CircuitBreaker(name, failure_threshold=3, recovery_timeout=60)` state machine; `llm_breaker`/`tavily_breaker` global instances; `with_circuit_breaker(breaker, fallback)` decorator
 - **Degradation**: `safe_graph_search()` wraps `local_graph_search` with try/except → fallback to `retrieve_documents` (Dense+Sparse only)
 - **Retry**: `with_retry(max_attempts=3)` uses tenacity exponential backoff (1s→2s→4s) for ConnectionError/TimeoutError
+- **Semantic cache**: `query_cache(query)` checks Milvus ANN + cosine ≥ threshold before RAG; `write_cache(query, response)` stores on generation complete; `invalidate_by_filename(filename)` on document delete
+- **Model routing**: `get_model_for_agent(agent_name)` returns ChatOpenAI with model from `ROUTE_MAP`; Supervisor/DirectAnswer use qwen-turbo, heavy tasks use qwen-plus/max
+- **Singleflight**: `with_singleflight(key_prefix)` decorator wraps `write_cache` to prevent cache stampede under high concurrency

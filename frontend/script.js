@@ -12,18 +12,26 @@ createApp({
             sessions: [],
             sidebarCollapsed: false,
             isComposing: false,
+            liveAgents: [],
+            traceSteps: [],
+            hitlState: null,
+            hitlAction: null,
+            hitlModifiedInput: '',
+            hitlPending: false,
             documents: [],
             documentsLoading: false,
             selectedFile: null,
             isUploading: false,
             uploadProgress: '',
+            uploadPercent: 0,
             theme: localStorage.getItem('ragent-theme') || 'light',
             toasts: [],
             toastId: 0,
             confirmState: null,
             isDragOver: false,
             sessionsLoading: false,
-            skipAnimation: false
+            skipAnimation: false,
+            showTrace: false
         };
     },
     mounted() {
@@ -63,6 +71,14 @@ createApp({
             return marked.parse(text);
         },
 
+        renderMessage(msg) {
+            if (!msg.text) return '';
+            if (msg._streaming) {
+                return this.escapeHtml(msg.text).replace(/\n/g, '<br>');
+            }
+            return marked.parse(msg.text);
+        },
+
         escapeHtml(text) {
             const div = document.createElement('div');
             div.textContent = text;
@@ -91,13 +107,15 @@ createApp({
         async handleSend() {
             const text = this.userInput.trim();
             if (!text || this.isLoading || this.isComposing) return;
+            if (this.hitlState) { this.showToast('请先完成人工审核', 'warning'); return; }
 
             this.messages.push({ text, isUser: true });
             this.userInput = '';
             this.$nextTick(() => { this.resetTextareaHeight(); this.scrollToBottom(); });
 
+            this.showTrace = true;
             this.isLoading = true;
-            this.messages.push({ text: '', isUser: false, isThinking: true, ragTrace: null, ragSteps: [] });
+            this.messages.push({ text: '', isUser: false, isThinking: true, _streaming: true, ragTrace: null, ragSteps: [], agentRoutes: [], webSearchResults: [], agentTrace: null });
             const botIdx = this.messages.length - 1;
             this.abortController = new AbortController();
 
@@ -139,6 +157,53 @@ createApp({
                             } else if (data.type === 'rag_step') {
                                 if (!this.messages[botIdx].ragSteps) this.messages[botIdx].ragSteps = [];
                                 this.messages[botIdx].ragSteps.push(data.step);
+                                this.traceSteps.push({
+                                    timestamp: Date.now(),
+                                    agent: (data.step.agent) || 'rag',
+                                    message: (data.step.icon || '') + ' ' + (data.step.message || '')
+                                });
+                            } else if (data.type === 'routing') {
+                                if (!this.messages[botIdx].agentRoutes) this.messages[botIdx].agentRoutes = [];
+                                this.messages[botIdx].agentRoutes.push({
+                                    agent: data.agent,
+                                    reason: data.reason,
+                                    timestamp: Date.now()
+                                });
+                            } else if (data.type === 'web_search_results') {
+                                this.messages[botIdx].webSearchResults = data.results || [];
+                            } else if (data.type === 'agent_trace') {
+                                this.messages[botIdx].agentTrace = data.agent_trace;
+                            } else if (data.type === 'agent_start') {
+                                const existing = this.liveAgents.find(a => a.name === data.agent);
+                                if (existing) {
+                                    existing.status = 'active';
+                                } else {
+                                    this.liveAgents.push({ name: data.agent, status: 'active' });
+                                }
+                                this.traceSteps.push({ timestamp: Date.now(), agent: data.agent, message: '开始回答' });
+                            } else if (data.type === 'agent_done') {
+                                const agent = this.liveAgents.find(a => a.name === data.agent);
+                                if (agent) agent.status = 'done';
+                            } else if (data.type === 'worker_content') {
+                                // 不推送完整回答到追踪面板
+                            } else if (data.type === 'graph_expand') {
+                                this.traceSteps.push({
+                                    timestamp: Date.now(),
+                                    agent: data.agent,
+                                    message: '🔗 ' + data.message
+                                });
+                            } else if (data.type === 'community_match') {
+                                this.traceSteps.push({
+                                    timestamp: Date.now(),
+                                    agent: data.agent,
+                                    message: '📊 ' + data.message
+                                });
+                            } else if (data.type === 'hitl_interrupt') {
+                                this.hitlState = data.data;
+                                this.hitlAction = null;
+                                this.hitlModifiedInput = '';
+                                this.isLoading = false;
+                                this.traceSteps.push({ timestamp: Date.now(), agent: 'system', message: 'HITL 中断，等待人工干预' });
                             } else if (data.type === 'error') {
                                 this.messages[botIdx].isThinking = false;
                                 this.messages[botIdx].text += `\n[Error: ${data.content}]`;
@@ -161,6 +226,7 @@ createApp({
             } finally {
                 this.isLoading = false;
                 this.abortController = null;
+                if (this.messages[botIdx]) this.messages[botIdx]._streaming = false;
                 this.$nextTick(() => this.scrollToBottom());
             }
         },
@@ -183,12 +249,22 @@ createApp({
             this.messages = [];
             this.sessionId = 'session_' + Date.now();
             this.activeNav = 'newChat';
+            this.liveAgents = [];
+            this.traceSteps = [];
+            this.showTrace = false;
+            this.refreshSessionList();
         },
 
-        handleClearChat() {
-            this.showConfirm('确定要清空当前对话吗？').then(ok => {
-                if (ok) this.messages = [];
-            });
+        async refreshSessionList() {
+            // 只刷新侧边栏会话列表，不加载最新会话的消息
+            try {
+                const res = await fetch('/sessions');
+                if (!res.ok) throw new Error('Failed');
+                const data = await res.json();
+                this.sessions = data.sessions;
+            } catch (e) {
+                console.error('Error loading sessions:', e);
+            }
         },
 
         async loadSessions() {
@@ -231,6 +307,8 @@ createApp({
         async loadSession(sessionId) {
             this.sessionId = sessionId;
             this.activeNav = 'newChat';
+            this.liveAgents = [];
+            this.traceSteps = [];
             await this.loadSessionMessages(sessionId);
         },
 
@@ -284,17 +362,50 @@ createApp({
             if (!this.selectedFile) return;
             this.isUploading = true;
             this.uploadProgress = '正在上传...';
+            this.uploadPercent = 0;
             try {
                 const fd = new FormData();
                 fd.append('file', this.selectedFile);
-                const res = await fetch('/documents/upload', { method: 'POST', body: fd });
-                if (!res.ok) { const e = await res.json(); throw new Error(e.detail || 'Upload failed'); }
-                const data = await res.json();
-                this.uploadProgress = data.message;
-                this.selectedFile = null;
-                if (this.$refs.fileInput) this.$refs.fileInput.value = '';
-                await this.loadDocuments();
-                setTimeout(() => { this.uploadProgress = ''; }, 3000);
+                const response = await fetch('/documents/upload', { method: 'POST', body: fd });
+                if (!response.ok) {
+                    const e = await response.json().catch(() => ({}));
+                    throw new Error(e.detail || 'Upload failed');
+                }
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, { stream: true });
+                    let idx;
+                    while ((idx = buffer.indexOf('\n\n')) !== -1) {
+                        const ev = buffer.slice(0, idx);
+                        buffer = buffer.slice(idx + 2);
+                        if (!ev.startsWith('data: ')) continue;
+                        try {
+                            const data = JSON.parse(ev.slice(6));
+                            if (data.type === 'progress') {
+                                this.uploadProgress = data.status;
+                                if (data.total > 0) {
+                                    this.uploadPercent = Math.round((data.current / data.total) * 100);
+                                }
+                            } else if (data.type === 'complete') {
+                                this.uploadProgress = data.message;
+                                this.uploadPercent = 100;
+                                this.selectedFile = null;
+                                if (this.$refs.fileInput) this.$refs.fileInput.value = '';
+                                await this.loadDocuments();
+                                setTimeout(() => { this.uploadProgress = ''; this.uploadPercent = 0; }, 3000);
+                            } else if (data.type === 'error') {
+                                throw new Error(data.message);
+                            }
+                        } catch (e) {
+                            if (e.message && !e.message.includes('JSON')) throw e;
+                        }
+                    }
+                }
             } catch (e) {
                 console.error('Error uploading:', e);
                 this.uploadProgress = '上传失败：' + e.message;
@@ -318,7 +429,13 @@ createApp({
         },
 
         getFileIcon(fileType) {
-            const map = { 'PDF': 'fas fa-file-pdf', 'Word': 'fas fa-file-word', 'Excel': 'fas fa-file-excel' };
+            const map = {
+                'PDF': 'fas fa-file-pdf',
+                'Word': 'fas fa-file-word',
+                'Excel': 'fas fa-file-excel',
+                'Markdown': 'fas fa-file-code',
+                'Image': 'fas fa-file-image'
+            };
             return map[fileType] || 'fas fa-file';
         },
 
@@ -378,7 +495,7 @@ createApp({
             const files = event.dataTransfer.files;
             if (files && files.length > 0) {
                 const file = files[0];
-                const validTypes = ['.pdf', '.doc', '.docx', '.xls', '.xlsx'];
+                const validTypes = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.md', '.markdown', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'];
                 const ext = '.' + file.name.split('.').pop().toLowerCase();
                 if (validTypes.includes(ext)) {
                     this.selectedFile = file;
@@ -387,6 +504,99 @@ createApp({
                     this.showToast('不支持的文件格式，请上传 PDF、Word 或 Excel 文件', 'warning');
                 }
             }
+        },
+
+        // HITL resolution
+        async resolveHitl(action) {
+            this.hitlPending = true;
+            try {
+                const body = { session_id: this.sessionId, action: action };
+                if (action === 'modify') body.modified_input = this.hitlModifiedInput;
+
+                const resp = await fetch('/chat/hitl/resume', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                if (!resp.ok) {
+                    const err = await resp.json();
+                    this.showToast('HITL 操作失败: ' + (err.detail || '未知错误'), 'error');
+                    this.hitlPending = false;
+                    return;
+                }
+
+                this.hitlState = null;
+                this.hitlPending = false;
+                this.messages.push({
+                    type: 'bot',
+                    text: '',
+                    isThinking: true,
+                    _streaming: true,
+                    ragTrace: null,
+                    ragSteps: [],
+                    agentRoutes: []
+                });
+                const botIdx = this.messages.length - 1;
+                this.messages[botIdx].isThinking = false;
+
+                const reader = resp.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, { stream: true });
+                    let idx;
+                    while ((idx = buffer.indexOf('\n\n')) !== -1) {
+                        const ev = buffer.slice(0, idx);
+                        buffer = buffer.slice(idx + 2);
+                        if (!ev.startsWith('data: ')) continue;
+                        const raw = ev.slice(6);
+                        if (raw === '[DONE]') continue;
+                        try {
+                            const data = JSON.parse(raw);
+                            if (data.type === 'content') {
+                                this.messages[botIdx].text += data.content;
+                            }
+                        } catch (e) {}
+                    }
+                }
+                this.messages[botIdx]._streaming = false;
+                this.$nextTick(() => this.scrollToBottom());
+            } catch (e) {
+                this.showToast('HITL 操作异常: ' + e.message, 'error');
+                this.hitlPending = false;
+            }
+        },
+
+        // HITL scenario label
+        hitlScenarioLabel(state) {
+            const labels = {
+                'low_confidence_rag': 'RAG 检索置信度过低',
+                'non_select_sql': 'SQL 语句安全审核',
+            };
+            return labels[state.scenario] || '人工干预';
+        },
+
+        // Format timestamp for trace
+        formatTime(ts) {
+            const d = new Date(ts);
+            return d.getHours().toString().padStart(2,'0') + ':' +
+                   d.getMinutes().toString().padStart(2,'0') + ':' +
+                   d.getSeconds().toString().padStart(2,'0');
+        },
+
+        // Agent Label Helper
+        agentLabel(agent) {
+            const labels = {
+                'rag_specialist': { icon: 'fas fa-database', text: '知识库专家', color: '#3b82f6' },
+                'web_searcher': { icon: 'fas fa-globe', text: '联网搜索', color: '#10b981' },
+                'data_analyst': { icon: 'fas fa-chart-bar', text: '数据分析', color: '#f59e0b' },
+                'direct_answer': { icon: 'fas fa-robot', text: '直接回答', color: '#8b5cf6' },
+                'local_graph_search': { icon: 'fas fa-project-diagram', text: '图谱检索', color: '#ec4899' },
+                'global_graph_search': { icon: 'fas fa-globe', text: '全局图谱', color: '#14b8a6' }
+            };
+            return labels[agent] || { icon: 'fas fa-cog', text: agent || '未知', color: '#6b7280' };
         },
 
         // RAG Trace Helper

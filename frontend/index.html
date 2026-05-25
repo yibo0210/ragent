@@ -11,7 +11,7 @@
     <link rel="icon" type="image/svg+xml" href="logo.svg">
     <link rel="apple-touch-icon" href="logo.svg">
     <link rel="stylesheet" href="style.css">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Nunito+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/github.min.css">
@@ -19,7 +19,7 @@
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
 </head>
 <body>
-    <div id="app" class="app-wrapper">
+    <div id="app" class="app-wrapper" :class="{'sidebar-collapsed-wrapper': sidebarCollapsed}">
 
         <!-- Sidebar -->
         <aside class="sidebar" :class="{'sidebar-collapsed': sidebarCollapsed}">
@@ -39,6 +39,18 @@
                 <i class="fas fa-plus"></i>
                 <span class="nav-label">新建对话</span>
             </button>
+
+            <!-- Quick Actions -->
+            <div class="sidebar-quick-actions">
+                <button class="sidebar-bottom-btn" @click="handleSettings" :class="{active: activeNav === 'settings'}">
+                    <i class="fas fa-gear"></i>
+                    <span class="nav-label">知识库管理</span>
+                </button>
+                <button class="sidebar-bottom-btn" @click="toggleTheme">
+                    <i :class="theme === 'dark' ? 'fas fa-sun' : 'fas fa-moon'"></i>
+                    <span class="nav-label">{{ theme === 'dark' ? '浅色模式' : '深色模式' }}</span>
+                </button>
+            </div>
 
             <!-- History List (always visible in sidebar) -->
             <div class="sidebar-history">
@@ -71,21 +83,6 @@
                 </div>
             </div>
 
-            <!-- Sidebar Bottom -->
-            <div class="sidebar-bottom">
-                <button class="sidebar-bottom-btn" @click="handleSettings" :class="{active: activeNav === 'settings'}">
-                    <i class="fas fa-gear"></i>
-                    <span class="nav-label">知识库管理</span>
-                </button>
-                <button class="sidebar-bottom-btn" @click="toggleTheme">
-                    <i :class="theme === 'dark' ? 'fas fa-sun' : 'fas fa-moon'"></i>
-                    <span class="nav-label">{{ theme === 'dark' ? '浅色模式' : '深色模式' }}</span>
-                </button>
-                <button class="sidebar-bottom-btn danger" @click="handleClearChat">
-                    <i class="fas fa-trash-can"></i>
-                    <span class="nav-label">清空对话</span>
-                </button>
-            </div>
         </aside>
 
         <!-- Main Area -->
@@ -108,11 +105,11 @@
                                 <div class="card-icon"><i class="fas fa-cloud-arrow-up"></i></div>
                                 <div>
                                     <h3>上传文档</h3>
-                                    <p>支持 PDF、Word、Excel 格式，上传后自动向量化</p>
+                                    <p>支持 PDF、Word、Excel、Markdown、图片，上传后自动向量化</p>
                                 </div>
                             </div>
                             <div class="upload-zone">
-                                <input type="file" ref="fileInput" @change="handleFileSelect" accept=".pdf,.doc,.docx,.xls,.xlsx" style="display:none"/>
+                                <input type="file" ref="fileInput" @change="handleFileSelect" accept=".pdf,.doc,.docx,.xls,.xlsx,.md,.markdown,.png,.jpg,.jpeg,.gif,.webp,.bmp" style="display:none"/>
                                 <div class="upload-drop"
                                      :class="{'drag-over': isDragOver}"
                                      @click="$refs.fileInput.click()"
@@ -131,8 +128,12 @@
                                         {{ isUploading ? '上传中...' : '开始上传' }}
                                     </button>
                                 </div>
+                                <div v-if="uploadPercent > 0 && isUploading" class="upload-progress">
+                                    <div class="upload-progress-bar" :style="{width: uploadPercent + '%'}"></div>
+                                </div>
                                 <div v-if="uploadProgress" class="upload-status" :class="{'status-error': uploadProgress.includes('失败')}">
                                     {{ uploadProgress }}
+                                    <span v-if="isUploading && uploadPercent > 0"> ({{ uploadPercent }}%)</span>
                                 </div>
                             </div>
                         </div>
@@ -141,23 +142,24 @@
                         <div class="settings-card">
                             <div class="card-header">
                                 <div class="card-icon"><i class="fas fa-database"></i></div>
-                                <div>
+                                <div style="flex:1">
                                     <h3>已入库文档</h3>
                                     <p>当前知识库中的所有文档</p>
                                 </div>
-                                <button class="btn-ghost" @click="loadDocuments" style="margin-left:auto">
-                                    <i class="fas fa-rotate"></i> 刷新
-                                </button>
                                 <div class="card-stats" v-if="documents.length > 0">
                                     <div class="card-stat">
-                                        <div class="card-stat-value">{{ documents.length }}</div>
-                                        <div class="card-stat-label">文档</div>
+                                        <span class="card-stat-value">{{ documents.length }}</span>
+                                        <span class="card-stat-label">个文档</span>
                                     </div>
+                                    <div class="card-stat-divider"></div>
                                     <div class="card-stat">
-                                        <div class="card-stat-value">{{ documents.reduce((s, d) => s + d.chunk_count, 0) }}</div>
-                                        <div class="card-stat-label">片段</div>
+                                        <span class="card-stat-value">{{ documents.reduce((s, d) => s + d.chunk_count, 0) }}</span>
+                                        <span class="card-stat-label">个片段</span>
                                     </div>
                                 </div>
+                                <button class="btn-ghost" @click="loadDocuments">
+                                    <i class="fas fa-rotate"></i> 刷新
+                                </button>
                             </div>
                             <div v-if="documentsLoading" class="skeleton-list">
                                 <div v-for="i in 3" :key="i" class="doc-row">
@@ -191,6 +193,9 @@
                 </div>
             </div>
 
+            <!-- Content Area -->
+            <div v-show="activeNav !== 'settings'" class="content-area">
+
             <!-- Chat View -->
             <div v-show="activeNav !== 'settings'" class="chat-view">
                 <!-- Chat Header -->
@@ -198,19 +203,8 @@
                     <button class="icon-btn mobile-menu" @click="sidebarCollapsed = !sidebarCollapsed">
                         <i class="fas fa-bars"></i>
                     </button>
-                    <div class="header-title">
-                        <span class="header-model">Ragent AI</span>
-                    </div>
+                    <div class="header-title"></div>
                     <div class="header-actions">
-                        <span class="header-badge">
-                            <i class="fas fa-robot"></i> RAG
-                        </span>
-                        <button class="icon-btn" @click="toggleTheme" :title="theme === 'dark' ? '浅色模式' : '深色模式'">
-                            <i :class="theme === 'dark' ? 'fas fa-sun' : 'fas fa-moon'"></i>
-                        </button>
-                        <button class="icon-btn" @click="handleSettings" title="知识库管理">
-                            <i class="fas fa-gear"></i>
-                        </button>
                     </div>
                 </header>
 
@@ -218,7 +212,6 @@
                 <div class="messages-scroll" ref="chatContainer" :class="{'no-animate': skipAnimation}">
                     <!-- Welcome Screen -->
                     <div v-if="messages.length === 0" class="welcome">
-                        <div class="welcome-logo"><img src="logo.svg" alt="Ragent"></div>
                         <h2>有什么我可以帮你的？</h2>
                         <p class="welcome-sub">我是你的 AI 学习助手，可以回答问题、分析文档、辅助学习</p>
                         <div class="suggestion-grid">
@@ -263,8 +256,17 @@
                                     </div>
                                 </div>
                             </div>
+                            <!-- Agent routing badges -->
+                            <div v-if="!msg.isUser && msg.agentRoutes && msg.agentRoutes.length" class="agent-routes">
+                                <div v-for="(route, ri) in msg.agentRoutes" :key="ri" class="agent-route-badge"
+                                     :style="{ borderColor: agentLabel(route.agent).color }">
+                                    <i :class="agentLabel(route.agent).icon" :style="{ color: agentLabel(route.agent).color }"></i>
+                                    <span>{{ agentLabel(route.agent).text }}</span>
+                                    <span v-if="route.reason" class="route-reason">{{ route.reason }}</span>
+                                </div>
+                            </div>
                             <!-- Message content -->
-                            <div v-else class="msg-content" v-html="msg.isUser ? escapeHtml(msg.text) : parseMarkdown(msg.text)"></div>
+                            <div v-if="msg.text" class="msg-content" v-html="msg.isUser ? escapeHtml(msg.text) : renderMessage(msg)"></div>
                             <!-- Message actions -->
                             <div v-if="!msg.isUser && !msg.isThinking && msg.text" class="msg-actions">
                                 <button class="msg-action-btn" @click="copyMessage(msg.text)" title="复制">
@@ -356,6 +358,19 @@
                                     </div>
                                 </details>
                             </div>
+                            <!-- Web Search Results -->
+                            <div v-if="!msg.isUser && msg.webSearchResults && msg.webSearchResults.length" class="msg-trace">
+                                <details class="trace-details">
+                                    <summary><i class="fas fa-globe"></i> 查看搜索结果</summary>
+                                    <div class="trace-body">
+                                        <div v-for="(result, wi) in msg.webSearchResults" :key="wi" class="web-result-item">
+                                            <a :href="result.url" target="_blank" rel="noopener" class="web-result-title">{{ result.title }}</a>
+                                            <div class="web-result-snippet">{{ result.snippet }}</div>
+                                            <div class="web-result-url">{{ result.url }}</div>
+                                        </div>
+                                    </div>
+                                </details>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -385,7 +400,61 @@
                     <div class="input-footer">AI 生成的内容可能包含错误，请仔细甄别。</div>
                 </div>
             </div>
+
+            <!-- Trace Sidebar Panel -->
+            <div v-if="showTrace" class="trace-panel">
+                    <div class="trace-panel-header">
+                        <span><i class="fas fa-project-diagram"></i> 推理追踪</span>
+                    </div>
+                    <div class="trace-canvas">
+                        <div v-if="liveAgents.length === 0" class="trace-empty">分析中...</div>
+                        <div v-for="agent in liveAgents" :key="agent.name" class="trace-agent-node" :class="'status-' + agent.status">
+                            <div class="agent-node-icon"><i :class="agentLabel(agent.name).icon"></i></div>
+                            <div class="agent-node-label">{{ agentLabel(agent.name).text }}</div>
+                            <div class="agent-node-status">
+                                <span v-if="agent.status === 'active'" class="pulse-dot"></span>
+                                <span class="agent-node-status-text">{{ agent.status === 'active' ? '执行中' : '已完成' }}</span>
+                            </div>
+                        </div>
+                        <div class="trace-steps">
+                            <div v-for="(step, si) in traceSteps" :key="si" class="trace-step-row">
+                                <span class="trace-step-time">{{ formatTime(step.timestamp) }}</span>
+                                <span class="trace-step-msg">{{ step.message }}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
         </main>
+
+        <!-- HITL Modal -->
+        <div v-if="hitlState" class="hitl-overlay">
+            <div class="hitl-modal">
+                <div class="hitl-header">
+                    <i class="fas fa-user-check"></i>
+                    <h3>需要人工审核</h3>
+                </div>
+                <div class="hitl-body">
+                    <div class="hitl-scenario">{{ hitlScenarioLabel(hitlState) }}</div>
+                    <div class="hitl-message">{{ hitlState.message }}</div>
+                    <div v-if="hitlState.scenario === 'non_select_sql'" class="hitl-sql-box">
+                        <pre><code>{{ hitlState.sql }}</code></pre>
+                    </div>
+                    <div v-if="hitlState.scenario === 'low_confidence_rag'" class="hitl-context">
+                        <p>原始查询：{{ hitlState.query }}</p>
+                        <p>评分失败次数：{{ hitlState.grade_fail_count }}</p>
+                    </div>
+                    <textarea v-if="hitlAction === 'modify'" v-model="hitlModifiedInput" class="hitl-modify-input" placeholder="输入修改后的查询或补充上下文..."></textarea>
+                </div>
+                <div class="hitl-actions">
+                    <button @click="resolveHitl('reject')" class="hitl-btn reject" :disabled="hitlPending">终止</button>
+                    <button v-if="!hitlAction" @click="hitlAction = 'modify'" class="hitl-btn modify" :disabled="hitlPending">修改</button>
+                    <button v-if="hitlAction === 'modify'" @click="resolveHitl('modify')" class="hitl-btn approve" :disabled="hitlPending">提交修改</button>
+                    <button v-if="!hitlAction" @click="resolveHitl('approve')" class="hitl-btn approve" :disabled="hitlPending">批准</button>
+                </div>
+            </div>
+        </div>
 
         <!-- Toast Notifications -->
         <div class="toast-container">

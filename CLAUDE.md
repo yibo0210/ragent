@@ -157,3 +157,7 @@ NetworkX · python-louvain
 - **Semantic cache**: `query_cache(query)` checks Milvus ANN + cosine ≥ threshold before RAG; `write_cache(query, response)` stores on generation complete; `invalidate_by_filename(filename)` on document delete
 - **Model routing**: `get_model_for_agent(agent_name)` returns ChatOpenAI with model from `ROUTE_MAP`; Supervisor/DirectAnswer use qwen-turbo, heavy tasks use qwen-plus/max
 - **Singleflight**: `with_singleflight(key_prefix)` decorator wraps `write_cache` to prevent cache stampede under high concurrency
+- **Supervisor manual JSON parsing**: Qwen `with_structured_output` incompatible with LangChain (json_mode needs "json" in prompt, function_calling conflicts with thinking mode). Fix: use `model.invoke()` + regex JSON extraction from response text.
+- **Checkpointer pending_writes**: `_load_writes` must return `(task_id, channel, value)` triples for LangGraph 0.2+ compatibility. Old format `(channel, value)` causes "not enough values to unpack (expected 3, got 2)".
+- **Milvus pymilvus 2.5 API**: `client.search()` uses `search_params` not `param`. Silent 0-result failure with old param name.
+- **Milvus gRPC reconnect**: `_ensure_connected()` calls `get_load_state()` before each query; resets client on failure to prevent "closed channel" errors.

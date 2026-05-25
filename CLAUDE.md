@@ -119,6 +119,13 @@ NetworkX · python-louvain
 | `scripts/run_entity_resolution.py` | Offline: entity dedup pipeline |
 | `scripts/run_evaluation.py` | Automated RAG eval + matplotlib charts |
 | `scripts/grid_search_rrf.py` | RRF weight grid search optimization |
+| `backend/observability/tracing.py` | OTel init + ConsoleSpanExporter + get_tracer |
+| `backend/observability/metrics.py` | Prometheus metrics: tokens, routing, latency, circuit breaker |
+| `backend/observability/logging.py` | structlog JSON logging configuration |
+| `backend/ha/circuit_breaker.py` | Circuit breaker state machine + LLM/Tavily protection |
+| `backend/ha/retry.py` | tenacity exponential backoff retry decorator |
+| `backend/ha/degradation.py` | Neo4j timeout → Dense+Sparse fallback |
+| `prometheus.yml` | Prometheus scrape config (targets app :8000) |
 | `frontend/script.js` | Vue 3: SSE handler, trace panel, HITL modal |
 
 ### Patterns
@@ -136,3 +143,9 @@ NetworkX · python-louvain
 - **Entity resolution**: `find_candidates_in_community` (edit-distance) → `resolve_entities_batch` (LLM confirm) → `merge_entity_pair` (Cypher DETACH DELETE + edge inheritance)
 - **DocumentIndex**: tracks filename-level version/state; `mark_document_deleted` bumps version and sets `is_deleted` on both ParentChunk and DocumentIndex
 - **RRF weights**: configurable via `RRF_WEIGHT_DENSE/SPARSE/GRAPH` env vars, grid-searchable via `scripts/grid_search_rrf.py`
+- **OTel manual spans**: `get_tracer("ragent.xxx")` + `tracer.start_as_current_span()` on Agent nodes, Milvus queries, Neo4j Cypher — no FastAPI auto-instrument
+- **Prometheus /metrics**: `init_metrics(app)` registers `/metrics` endpoint; `Metrics.record_*()` methods called from spans
+- **structlog**: `init_logging()` in `create_app()` configures JSON logging globally; use `get_logger("name")` for structured logging
+- **Circuit breaker**: `CircuitBreaker(name, failure_threshold=3, recovery_timeout=60)` state machine; `llm_breaker`/`tavily_breaker` global instances; `with_circuit_breaker(breaker, fallback)` decorator
+- **Degradation**: `safe_graph_search()` wraps `local_graph_search` with try/except → fallback to `retrieve_documents` (Dense+Sparse only)
+- **Retry**: `with_retry(max_attempts=3)` uses tenacity exponential backoff (1s→2s→4s) for ConnectionError/TimeoutError

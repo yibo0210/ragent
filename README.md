@@ -280,6 +280,18 @@ Neo4j Full Graph
 | **CI/CD Pipeline** | GitHub Actions: Docker services → DB init → pytest → import verification on every push |
 | **Visualization** | `scripts/run_evaluation.py` generates radar chart + per-query-type bar chart via matplotlib |
 
+### Observability & High Availability (v5.0)
+
+| Feature | Description |
+|---------|-------------|
+| **Distributed Tracing** | OpenTelemetry SDK with manual spans on all LangGraph Agent nodes, Milvus queries, and Neo4j Cypher calls |
+| **Prometheus Metrics** | `/metrics` endpoint exposes 6 custom metrics: LLM token usage, Agent routing count, vector/graph/LLM latency histograms, circuit breaker state |
+| **Structured JSON Logging** | structlog replaces default logging — every log line is JSON with timestamp, level, and event fields ready for ELK/Grafana Loki ingestion |
+| **Circuit Breaker** | Protects LLM and Tavily API calls: 3 failures in 60s → circuit opens → returns fallback response → auto-recovers after cooldown |
+| **Graceful Degradation** | Neo4j query timeout (1.5s) → automatic fallback to pure Dense+Sparse vector retrieval with warning log |
+| **Exponential Backoff Retry** | tenacity-based retry on network jitter: 3 attempts with 1s→2s→4s wait for LLM generation and Milvus writes |
+| **Monitoring Stack** | Docker Compose includes Jaeger (:16686), Prometheus (:9090), and Grafana (:3000) — one command to start the full observability suite |
+
 ---
 
 ## Tech Stack
@@ -326,8 +338,16 @@ Neo4j Full Graph
 <td>Ragas 0.4 · matplotlib · pytest (v4.0)</td>
 </tr>
 <tr>
+<td><strong>Observability</strong></td>
+<td>OpenTelemetry · Prometheus · Grafana · Jaeger · structlog (v5.0)</td>
+</tr>
+<tr>
+<td><strong>High Availability</strong></td>
+<td>pybreaker · tenacity · Neo4j query timeout (v5.0)</td>
+</tr>
+<tr>
 <td><strong>Infrastructure</strong></td>
-<td>Docker Compose (Milvus + etcd + MinIO + Attu + Neo4j) · GitHub Actions CI · Dockerfile (v4.0)</td>
+<td>Docker Compose (Milvus + etcd + MinIO + Attu + Neo4j + Jaeger + Prometheus + Grafana) · GitHub Actions CI · Dockerfile</td>
 </tr>
 </table>
 
@@ -377,6 +397,16 @@ Ragent-AI/
 │   │   ├── __init__.py
 │   │   ├── dataset.py          # Golden dataset loader
 │   │   └── metrics.py          # Ragas metrics (faithfulness, relevancy, precision)
+│   ├── observability/          # OpenTelemetry + Prometheus + structlog (v5.0)
+│   │   ├── __init__.py
+│   │   ├── tracing.py          # OTel init + manual span utilities
+│   │   ├── metrics.py          # Prometheus metrics + /metrics endpoint
+│   │   └── logging.py          # Structlog JSON logging configuration
+│   ├── ha/                     # High Availability modules (v5.0)
+│   │   ├── __init__.py
+│   │   ├── circuit_breaker.py  # Circuit breaker state machine
+│   │   ├── retry.py            # Exponential backoff retry decorator
+│   │   └── degradation.py      # Neo4j timeout → Dense+Sparse fallback
 │   └── schemas.py              # Pydantic request/response models + GraphEntity/GraphRelation
 │
 ├── scripts/
@@ -405,9 +435,10 @@ Ragent-AI/
 │   │   └── GraphRAG-v3.0-升级计划.md  # v3.0 — Implementation plan (5 phases)
 │   └── img.png                  # Application screenshot
 │
-├── docker-compose.yml          # Milvus stack + Neo4j (etcd + MinIO + Milvus + Attu + Neo4j)
+├── docker-compose.yml          # Full stack (Milvus + Neo4j + Jaeger + Prometheus + Grafana)
 ├── docker-compose.ci.yml       # CI environment services (v4.0)
 ├── Dockerfile                  # Application container image (v4.0)
+├── prometheus.yml              # Prometheus scrape configuration (v5.0)
 ├── .github/workflows/ci.yml    # GitHub Actions CI pipeline (v4.0)
 ├── pyproject.toml              # Python dependencies & project metadata
 ├── start.py                    # UTF-8 startup script (uvicorn wrapper)
@@ -578,6 +609,11 @@ This will:
 | `RRF_WEIGHT_SPARSE` | `0.3` | RRF sparse channel weight (v4.0) |
 | `RRF_WEIGHT_GRAPH` | `0.3` | RRF graph channel weight (v4.0) |
 | `ENTITY_SIM_THRESHOLD` | `0.75` | Entity dedup edit-distance threshold (v4.0) |
+| `OTEL_ENABLED` | `false` | Enable OpenTelemetry tracing (v5.0) |
+| `METRICS_ENABLED` | `true` | Enable Prometheus /metrics endpoint (v5.0) |
+| `LOG_LEVEL` | `INFO` | Log level: DEBUG / INFO / WARNING (v5.0) |
+| `LOG_FORMAT` | `json` | Log format: json / console (v5.0) |
+| `NEO4J_QUERY_TIMEOUT` | `1.5` | Neo4j Cypher query timeout in seconds (v5.0) |
 
 ### Chunking Parameters
 
@@ -628,6 +664,12 @@ This will:
 | `GET` | `/sessions` | List all sessions |
 | `GET` | `/sessions/{id}` | Get session messages |
 | `DELETE` | `/sessions/{id}` | Delete a session |
+
+### Metrics (v5.0)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/metrics` | Prometheus metrics endpoint (token usage, latency, routing, circuit breaker) |
 
 ### Documents
 
@@ -690,7 +732,18 @@ This will:
 - [x] Evaluation visualization (radar chart + per-type bar chart)
 - [x] Entity resolution CLI script (`scripts/run_entity_resolution.py`)
 
-### v4.x — Planned
+### v5.0 — Observability & High Availability ✓
+
+- [x] OpenTelemetry distributed tracing (manual spans on Agent nodes + Milvus + Neo4j)
+- [x] Prometheus `/metrics` endpoint (6 custom metrics)
+- [x] structlog structured JSON logging
+- [x] Circuit breaker for LLM and Tavily API (3 failures → OPEN → fallback)
+- [x] Neo4j query timeout with graceful degradation to Dense+Sparse
+- [x] Exponential backoff retry for LLM generation and DB writes
+- [x] Docker Compose monitoring stack (Jaeger + Prometheus + Grafana)
+- [x] Grafana pre-configured with Prometheus data source
+
+### v5.x — Planned
 
 - [ ] Editable session names in sidebar
 - [ ] HITL state recovery on page refresh (polling endpoint)

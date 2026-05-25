@@ -4,6 +4,7 @@ from datasets import Dataset
 from ragas import evaluate
 from ragas.metrics import faithfulness, answer_relevancy, context_precision
 from langchain.chat_models import init_chat_model
+from langchain_openai import OpenAIEmbeddings
 
 LLM = init_chat_model(
     model=os.getenv("GRADE_MODEL", os.getenv("MODEL", "qwen-plus")),
@@ -11,6 +12,12 @@ LLM = init_chat_model(
     api_key=os.getenv("ARK_API_KEY"),
     base_url=os.getenv("BASE_URL"),
     temperature=0.0,
+)
+
+EMBEDDINGS = OpenAIEmbeddings(
+    model=os.getenv("EMBEDDER", "text-embedding-v1"),
+    api_key=os.getenv("ARK_API_KEY"),
+    base_url=os.getenv("BASE_URL"),
 )
 
 
@@ -21,5 +28,6 @@ def compute_ragas_metrics(data_samples: list[dict]) -> dict:
         dataset=dataset,
         metrics=[context_precision, faithfulness, answer_relevancy],
         llm=LLM,
+        embeddings=EMBEDDINGS,
     )
     return {k: round(float(v), 4) for k, v in result.items()}

@@ -94,12 +94,52 @@ services:
     networks:
       - default
 
+  # ===== v5.0 可观测性栈 =====
+  jaeger:
+    container_name: ragent-jaeger
+    image: jaegertracing/all-in-one:1.58
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+      - "4318:4318"
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    networks:
+      - default
+
+  prometheus:
+    container_name: ragent-prometheus
+    image: prom/prometheus:v2.52.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=15d'
+    networks:
+      - default
+
+  grafana:
+    container_name: ragent-grafana
+    image: grafana/grafana:10.4.0
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+    volumes:
+      - grafana_data:/var/lib/grafana
+    networks:
+      - default
+
 volumes:
   etcd_data:
   minio_data:
   milvus_data:
   neo4j_data:
   neo4j_logs:
+  grafana_data:
 
 networks:
   default:

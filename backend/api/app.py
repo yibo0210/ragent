@@ -33,6 +33,13 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    # --- v5.0 可观测性 ---
+    from backend.observability import init_logging, init_tracing, init_metrics
+    init_logging()
+    init_tracing(app)
+    init_metrics(app)
+    # ---
+
     # No-cache middleware for development
     @app.middleware("http")
     async def _no_cache(request, call_next):

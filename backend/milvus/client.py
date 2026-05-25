@@ -98,26 +98,35 @@ class MilvusManager:
 #构建两个向量检索请求（稠密向量 dense_embedding、稀疏向量 sparse_embedding），均使用 IP 度量方式；
 #采用 RRFRanker 排序器对两类检索结果融合排序，返回 Top-K 结果（默认 5 条），输出文本内容和文件名。
     def hybrid_retrieve(self, dense_embedding, sparse_embedding, top_k=5, filter_expr=""):
+        import time
+        from backend.observability import get_tracer, Metrics
+
         client = self._client()
-        print("[INFO] RAG混合检索已触发")
-        reqs = [
-            AnnSearchRequest(data=[dense_embedding], anns_field="dense_embedding", param={"metric_type":"IP"}, limit=top_k),
-            AnnSearchRequest(data=[sparse_embedding], anns_field="sparse_embedding", param={"metric_type":"IP"}, limit=top_k)
-        ]
-        if filter_expr:
-            for req in reqs:
-                req.filter = filter_expr
-        results = client.hybrid_search(
-            collection_name=self.collection_name,
-            reqs=reqs,
-            ranker=RRFRanker(),
-            limit=top_k,
-            output_fields=["text", "filename", "chunk_id", "page_number"]
-        )
-        # 展平嵌套列表 [[...]] -> [...]
-        if results and isinstance(results[0], list):
-            return results[0]
-        return results
+        tracer = get_tracer("ragent.milvus")
+        t0 = time.time()
+        with tracer.start_as_current_span("milvus.hybrid_retrieve") as span:
+            span.set_attribute("top_k", top_k)
+            reqs = [
+                AnnSearchRequest(data=[dense_embedding], anns_field="dense_embedding", param={"metric_type":"IP"}, limit=top_k),
+                AnnSearchRequest(data=[sparse_embedding], anns_field="sparse_embedding", param={"metric_type":"IP"}, limit=top_k)
+            ]
+            if filter_expr:
+                for req in reqs:
+                    req.filter = filter_expr
+            results = client.hybrid_search(
+                collection_name=self.collection_name,
+                reqs=reqs,
+                ranker=RRFRanker(),
+                limit=top_k,
+                output_fields=["text", "filename", "chunk_id", "page_number"]
+            )
+            if results and isinstance(results[0], list):
+                results = results[0]
+            dt = time.time() - t0
+            span.set_attribute("duration_ms", dt * 1000)
+            span.set_attribute("result_count", len(results) if results else 0)
+            Metrics.record_vector_search(dt)
+            return results
 
     def get_chunks_by_ids(self, chunk_ids):
         if not chunk_ids:

@@ -11,15 +11,33 @@ def _get_driver() -> Driver:
         uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
         user = os.getenv("NEO4J_USER", "neo4j")
         password = os.getenv("NEO4J_PASSWORD", "password")
-        _neo4j_driver = GraphDatabase.driver(uri, auth=(user, password))
+        _neo4j_driver = GraphDatabase.driver(
+            uri, auth=(user, password),
+            max_connection_lifetime=30,
+            connection_acquisition_timeout=3,
+        )
     return _neo4j_driver
 
 
-def run_cypher(query: str, params: dict = None) -> list[dict]:
-    """执行只读 Cypher 查询，返回记录列表。"""
-    with _get_driver().session() as session:
-        result = session.run(query, params or {})
-        return [dict(record) for record in result]
+def run_cypher(query: str, params: dict = None, timeout: float = None) -> list[dict]:
+    """执行只读 Cypher 查询，返回记录列表，支持超时。"""
+    import time
+    from backend.observability import get_tracer, Metrics
+
+    if timeout is None:
+        timeout = float(os.getenv("NEO4J_QUERY_TIMEOUT", "1.5"))
+    tracer = get_tracer("ragent.neo4j")
+    with tracer.start_as_current_span("neo4j.run_cypher") as span:
+        span.set_attribute("cypher.query", query[:200])
+        t0 = time.time()
+        with _get_driver().session() as session:
+            result = session.run(query, params or {}, timeout=timeout)
+            records = [dict(record) for record in result]
+        dt = time.time() - t0
+        span.set_attribute("duration_ms", dt * 1000)
+        span.set_attribute("result_count", len(records))
+        Metrics.record_graph_query(dt)
+        return records
 
 
 def write_cypher(query: str, params: dict = None) -> dict:

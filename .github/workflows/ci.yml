@@ -60,7 +60,11 @@ jobs:
           from backend.storage.graph_client import run_cypher
           from backend.milvus.client import MilvusManager
           from backend.evaluation.metrics import compute_ragas_metrics
-          print('All imports successful')
+          from backend.observability import init_tracing, init_metrics, init_logging
+          from backend.ha.circuit_breaker import CircuitBreaker, llm_breaker
+          from backend.ha.retry import with_retry
+          from backend.ha.degradation import safe_graph_search
+          print('All v5.0 imports successful')
           "
 
       - name: Cleanup

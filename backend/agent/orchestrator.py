@@ -14,8 +14,13 @@
 """
 from typing import Annotated, Literal, Optional, TypedDict
 import os
+import time
 
 from dotenv import load_dotenv
+from backend.observability import get_tracer, get_logger, Metrics
+
+tracer = get_tracer("ragent.agent")
+log = get_logger("ragent.agent")
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
 from langgraph.graph import StateGraph, END
@@ -277,6 +282,10 @@ def supervisor_node(state: SupervisorState) -> dict:
     agent_trace["routing_is_temporal"] = is_temporal
     agent_trace["routing_temporal_year"] = temporal_year
 
+    log.info("routing_decision", routes=routes, reason=reason, query=user_query[:100])
+    for r in routes:
+        Metrics.record_routing(r)
+
     return {
         "next_worker": routes[0],
         "next_workers": routes,
@@ -507,8 +516,9 @@ def direct_answer_node(state: SupervisorState) -> dict:
 
 
 def local_graph_search_node(state: SupervisorState) -> dict:
-    """图谱局部检索节点：向量检索 + Neo4j 外扩。"""
+    """图谱局部检索节点：向量检索 + Neo4j 外扩（含降级保护）。"""
     from backend.rag.graph_retriever import local_graph_search
+    from backend.ha.degradation import safe_graph_search
     from .tools import emit_graph_step
 
     user_query = state.get("user_query", "")
@@ -528,7 +538,9 @@ def local_graph_search_node(state: SupervisorState) -> dict:
         }
 
     emit_graph_step("🔍", "正在检索知识图谱...", agent="local_graph_search")
-    result = local_graph_search(user_query, time_filter=time_filter)
+    with tracer.start_as_current_span("agent.local_graph_search") as span:
+        span.set_attribute("query", user_query[:200])
+        result = safe_graph_search(user_query)
 
     emit_graph_step(
         "🔗",

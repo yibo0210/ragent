@@ -95,22 +95,30 @@ NetworkX · python-louvain
 
 | File | Purpose |
 |------|---------|
-| `backend/agent/orchestrator.py` | Supervisor graph: 6 agents + synthesize |
+| `backend/agent/orchestrator.py` | Supervisor graph: 6 agents + synthesize + temporal routing |
 | `backend/agent/brain.py` | SSE streaming, conversation storage, HITL resume |
 | `backend/agent/tools.py` | emit_rag_step, emit_graph_step, token queue, weather/search |
 | `backend/rag/pipeline.py` | RAG LangGraph (retrieve→grade→rewrite) |
-| `backend/rag/utils.py` | Hybrid retrieval, rerank, auto-merge, 3-channel RRF |
-| `backend/rag/graph_retriever.py` | local_graph_search, global_graph_search |
+| `backend/rag/utils.py` | Hybrid retrieval, rerank, auto-merge, 3-channel RRF (configurable weights) |
+| `backend/rag/graph_retriever.py` | local_graph_search, global_graph_search (+ time_filter) |
 | `backend/documents/loader.py` | Hierarchical chunking (PDF/Word/Excel/MD/Image) |
-| `backend/documents/graph_extractor.py` | LLM entity/relation extraction |
+| `backend/documents/graph_extractor.py` | LLM entity/relation extraction (+ valid_from/valid_to) |
 | `backend/storage/graph_client.py` | Neo4j driver (run_cypher/write_cypher) |
-| `backend/storage/graph_ingestion.py` | MERGE entities + relations into Neo4j |
+| `backend/storage/graph_ingestion.py` | MERGE entities + relations (+ temporal fields) |
+| `backend/storage/graph_cleanup.py` | Neo4j cascade cleanup: strip edges, remove orphans |
+| `backend/storage/doc_lifecycle.py` | Document lifecycle: soft-delete, chunk ID query |
 | `backend/graph/community.py` | Leiden clustering, summaries, Milvus indexing |
-| `backend/milvus/client.py` | Milvus hybrid search (dense+sparse RRF) |
+| `backend/graph/entity_resolution.py` | Two-stage entity dedup: edit-distance + LLM + Cypher merge |
+| `backend/evaluation/dataset.py` | Golden dataset loader (50 QA pairs) |
+| `backend/evaluation/metrics.py` | Ragas metrics: faithfulness, relevancy, precision |
+| `backend/milvus/client.py` | Milvus hybrid search + delete_by_chunk_ids + is_deleted filter |
 | `backend/embedding/service.py` | Dense (Qwen API) + Sparse (BM25) |
-| `backend/storage/models.py` | ORM: sessions, messages, chunks, CommunitySummary, checkpoints |
-| `backend/schemas.py` | Pydantic: Chat*, Document*, HITL*, GraphEntity, GraphRelation |
+| `backend/storage/models.py` | ORM: sessions, messages, chunks, CommunitySummary, DocumentIndex, checkpoints (+ soft-delete fields) |
+| `backend/schemas.py` | Pydantic: Chat*, Document*, HITL*, GraphEntity, GraphRelation, DocumentStatus |
 | `scripts/run_community_clustering.py` | Offline: graph→cluster→summarize→index |
+| `scripts/run_entity_resolution.py` | Offline: entity dedup pipeline |
+| `scripts/run_evaluation.py` | Automated RAG eval + matplotlib charts |
+| `scripts/grid_search_rrf.py` | RRF weight grid search optimization |
 | `frontend/script.js` | Vue 3: SSE handler, trace panel, HITL modal |
 
 ### Patterns
@@ -123,3 +131,8 @@ NetworkX · python-louvain
 - **source_chunks**: every Neo4j edge stores referencing L3 chunk IDs for provenance
 - **Milvus dynamic schema**: `enable_dynamic_field=True`, community summaries coexist with doc chunks
 - **Graph events in SSE**: `_RagStepProxy` detects graph agents and auto-emits `graph_expand`/`community_match`
+- **Soft-delete cascade**: DELETE endpoint → MySQL `is_deleted` → Milvus `delete_by_chunk_ids` → Neo4j `strip_chunk_from_edges` → `remove_empty_edges` → `remove_orphan_entities`
+- **Temporal routing**: Supervisor detects time-sensitive queries (`is_temporal`/`temporal_year`) → `local_graph_search_node` passes `time_filter` → Cypher filters by `valid_from`/`valid_to`
+- **Entity resolution**: `find_candidates_in_community` (edit-distance) → `resolve_entities_batch` (LLM confirm) → `merge_entity_pair` (Cypher DETACH DELETE + edge inheritance)
+- **DocumentIndex**: tracks filename-level version/state; `mark_document_deleted` bumps version and sets `is_deleted` on both ParentChunk and DocumentIndex
+- **RRF weights**: configurable via `RRF_WEIGHT_DENSE/SPARSE/GRAPH` env vars, grid-searchable via `scripts/grid_search_rrf.py`

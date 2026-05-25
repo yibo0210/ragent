@@ -261,6 +261,25 @@ Neo4j Full Graph
 | **Dual Theme** | Gemini-inspired Light/Dark theme with CSS variables; persisted to localStorage |
 | **Dead-Loop Detection** | LangGraph `recursion_limit=15` prevents infinite agent loops |
 
+### Knowledge Governance (v4.0)
+
+| Feature | Description |
+|---------|-------------|
+| **Cascading Soft-Delete** | Cross-database cascade: MySQL `is_deleted` → Milvus batch delete → Neo4j edge strip + orphan cleanup |
+| **Document Index** | `document_index` table tracks filename-level version, hash, and deletion state |
+| **Entity Resolution** | Two-stage dedup: intra-community edit-distance recall → LLM confirmation → Cypher node merge with edge inheritance |
+| **Temporal GraphRAG** | `valid_from`/`valid_to` on entities and relations; Supervisor auto-routes time-sensitive queries with year filter |
+
+### Evaluation & CI/CD (v4.0)
+
+| Feature | Description |
+|---------|-------------|
+| **Golden Dataset** | 50 hand-crafted QA pairs covering conceptual and detail queries across all system features |
+| **Ragas Metrics** | Automated faithfulness, answer relevancy, and context precision scoring |
+| **RRF Grid Search** | `scripts/grid_search_rrf.py` — 0.1-step traversal of normalized weight combinations, auto-selects best |
+| **CI/CD Pipeline** | GitHub Actions: Docker services → DB init → pytest → import verification on every push |
+| **Visualization** | `scripts/run_evaluation.py` generates radar chart + per-query-type bar chart via matplotlib |
+
 ---
 
 ## Tech Stack
@@ -303,8 +322,12 @@ Neo4j Full Graph
 <td>Tavily (web search) · Gaode/Amap (weather)</td>
 </tr>
 <tr>
+<td><strong>Evaluation</strong></td>
+<td>Ragas 0.4 · matplotlib · pytest (v4.0)</td>
+</tr>
+<tr>
 <td><strong>Infrastructure</strong></td>
-<td>Docker Compose (Milvus + etcd + MinIO + Attu + Neo4j)</td>
+<td>Docker Compose (Milvus + etcd + MinIO + Attu + Neo4j) · GitHub Actions CI · Dockerfile (v4.0)</td>
 </tr>
 </table>
 
@@ -342,22 +365,34 @@ Ragent-AI/
 │   │   ├── cache.py            # Redis cache utility + HITL distributed lock
 │   │   ├── checkpointer.py     # MySQLSaver — LangGraph state persistence
 │   │   ├── parent_chunk_store.py  # Parent chunk storage (MySQL + Redis cache)
+│   │   ├── doc_lifecycle.py    # Document lifecycle: soft-delete, chunk ID query (v4.0)
 │   │   ├── graph_client.py     # Neo4j driver wrapper (run_cypher / write_cypher)
 │   │   ├── graph_schema.py     # Neo4j constraints & indexes initialization
-│   │   └── graph_ingestion.py  # Batch MERGE entities + relations into Neo4j
+│   │   ├── graph_ingestion.py  # Batch MERGE entities + relations into Neo4j
+│   │   └── graph_cleanup.py    # Neo4j cascade cleanup (orphan edges/nodes) (v4.0)
 │   ├── graph/
-│   │   └── community.py        # Leiden clustering, community summarization, Milvus indexing
+│   │   ├── community.py        # Leiden clustering, community summarization, Milvus indexing
+│   │   └── entity_resolution.py # Two-stage entity dedup (edit-distance + LLM + merge) (v4.0)
+│   ├── evaluation/             # Automated RAG evaluation (v4.0)
+│   │   ├── __init__.py
+│   │   ├── dataset.py          # Golden dataset loader
+│   │   └── metrics.py          # Ragas metrics (faithfulness, relevancy, precision)
 │   └── schemas.py              # Pydantic request/response models + GraphEntity/GraphRelation
 │
 ├── scripts/
-│   └── run_community_clustering.py  # Offline script: build graph → cluster → summarize → index
+│   ├── run_community_clustering.py  # Offline: build graph → cluster → summarize → index
+│   ├── run_entity_resolution.py    # Offline: entity dedup pipeline (v4.0)
+│   ├── run_evaluation.py           # Automated RAG eval + charts (v4.0)
+│   └── grid_search_rrf.py          # RRF weight optimization (v4.0)
 │
 ├── frontend/
 │   ├── index.html              # Vue 3 SPA (chat, trace canvas, HITL modal, settings)
 │   ├── script.js               # Application logic, SSE handler, API integration
 │   └── style.css               # Gemini-inspired dual-theme (Light/Dark)
 │
-├── tests/                      # Integration test scripts (WIP)
+├── tests/
+│   ├── test_doc_lifecycle.py   # Soft-delete unit tests (v4.0)
+│   └── golden_dataset.json     # 50-item evaluation dataset (v4.0)
 │
 ├── data/
 │   └── documents/              # Uploaded document storage
@@ -371,6 +406,9 @@ Ragent-AI/
 │   └── img.png                  # Application screenshot
 │
 ├── docker-compose.yml          # Milvus stack + Neo4j (etcd + MinIO + Milvus + Attu + Neo4j)
+├── docker-compose.ci.yml       # CI environment services (v4.0)
+├── Dockerfile                  # Application container image (v4.0)
+├── .github/workflows/ci.yml    # GitHub Actions CI pipeline (v4.0)
 ├── pyproject.toml              # Python dependencies & project metadata
 ├── start.py                    # UTF-8 startup script (uvicorn wrapper)
 ├── .env.example                # Environment configuration template
@@ -536,6 +574,10 @@ This will:
 | `AUTO_MERGE_THRESHOLD` | `2` | Min sibling chunks to trigger merge |
 | `LEAF_RETRIEVE_LEVEL` | `3` | Leaf chunk level for retrieval |
 | `WEB_SEARCH_MAX_RESULTS` | `5` | Max web search results |
+| `RRF_WEIGHT_DENSE` | `0.4` | RRF dense channel weight (v4.0) |
+| `RRF_WEIGHT_SPARSE` | `0.3` | RRF sparse channel weight (v4.0) |
+| `RRF_WEIGHT_GRAPH` | `0.3` | RRF graph channel weight (v4.0) |
+| `ENTITY_SIM_THRESHOLD` | `0.75` | Entity dedup edit-distance threshold (v4.0) |
 
 ### Chunking Parameters
 
@@ -631,16 +673,32 @@ This will:
 - [x] SSE graph_expand / community_match events (brain.py)
 - [x] Frontend trace panel graph event handling (script.js)
 
-### v3.x — Planned
+### v4.0 — Knowledge Governance & Evaluation Pipeline ✓
 
-- [ ] Neo4j cascading delete on document removal
-- [ ] Graph extraction progress callback during upload
-- [ ] Entity-level citation links in answers
-- [ ] Graph visualization panel in frontend (D3.js force graph)
-- [ ] Scheduled auto-run of community clustering after batch uploads
+- [x] Cross-database cascading soft-delete (MySQL → Milvus → Neo4j)
+- [x] Document lifecycle state machine (DocumentIndex table + versioning)
+- [x] Neo4j orphan node/edge garbage collection
+- [x] Two-stage entity resolution (edit-distance + LLM confirmation + Cypher merge)
+- [x] Temporal knowledge graph (valid_from / valid_to on entities and relations)
+- [x] Temporal sensitivity routing in Supervisor
+- [x] Golden evaluation dataset (50 QA pairs across 2 query types)
+- [x] Ragas automated evaluation pipeline (faithfulness, answer relevancy, context precision)
+- [x] RRF three-channel weight grid search (0.1 step, auto-optimize)
+- [x] RRF weights configurable via environment variables
+- [x] GitHub Actions CI/CD pipeline
+- [x] Dockerfile for application containerization
+- [x] Evaluation visualization (radar chart + per-type bar chart)
+- [x] Entity resolution CLI script (`scripts/run_entity_resolution.py`)
+
+### v4.x — Planned
+
 - [ ] Editable session names in sidebar
 - [ ] HITL state recovery on page refresh (polling endpoint)
 - [ ] Conversation export (Markdown / PDF)
+- [ ] Graph visualization panel in frontend (D3.js force graph)
+- [ ] Entity-level citation links in answers
+- [ ] Scheduled auto-run of community clustering after batch uploads
+- [ ] Graph extraction progress callback during upload
 
 ---
 

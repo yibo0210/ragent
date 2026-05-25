@@ -93,6 +93,50 @@ class MilvusManager:
         filter_expr = f"chunk_id in [{ids_str}]"
         res = self.delete(filter_expr)
         return res.get("delete_count", 0) if isinstance(res, dict) else 0
+    CACHE_COLLECTION = "semantic_cache_collection"
+
+    def init_cache_collection(self):
+        client = self._client()
+        if not client.has_collection(self.CACHE_COLLECTION):
+            schema = client.create_schema(auto_id=True)
+            schema.add_field("id", DataType.INT64, is_primary=True)
+            schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=1536)
+            schema.add_field("query_hash", DataType.VARCHAR, max_length=64)
+            schema.add_field("query_text", DataType.VARCHAR, max_length=2000)
+            schema.add_field("source_doc", DataType.VARCHAR, max_length=255)
+            index_params = client.prepare_index_params()
+            index_params.add_index(field_name="embedding", index_type="HNSW", metric_type="COSINE")
+            client.create_collection(collection_name=self.CACHE_COLLECTION, schema=schema, index_params=index_params)
+            client.load_collection(self.CACHE_COLLECTION)
+        else:
+            client.load_collection(self.CACHE_COLLECTION)
+
+    def search_cache(self, query_vector: list[float], top_k: int = 3) -> list[dict]:
+        client = self._client()
+        results = client.search(
+            collection_name=self.CACHE_COLLECTION,
+            data=[query_vector],
+            anns_field="embedding",
+            param={"metric_type": "COSINE"},
+            limit=top_k,
+            output_fields=["query_hash", "query_text", "source_doc"],
+        )
+        return results[0] if results else []
+
+    def insert_cache(self, query_vector, query_hash, query_text, source_doc=""):
+        client = self._client()
+        data = [{"embedding": query_vector, "query_hash": query_hash,
+                 "query_text": query_text[:2000], "source_doc": source_doc}]
+        return client.insert(self.CACHE_COLLECTION, data)
+
+    def delete_cache_by_source(self, source_doc: str) -> int:
+        client = self._client()
+        res = client.delete(
+            collection_name=self.CACHE_COLLECTION,
+            filter=f'source_doc == "{source_doc}"',
+        )
+        return res.get("delete_count", 0) if isinstance(res, dict) else 0
+
 #混合向量检索（hybrid_retrieve）
 #RAG 场景核心方法，支持稠密 + 稀疏向量混合检索：
 #构建两个向量检索请求（稠密向量 dense_embedding、稀疏向量 sparse_embedding），均使用 IP 度量方式；

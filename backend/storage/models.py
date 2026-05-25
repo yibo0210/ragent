@@ -98,6 +98,21 @@ class DocumentIndex(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 
 
+class QueryCacheStore(Base):
+    """语义缓存存储表 — 存储高频问题的 LLM 回答。"""
+    __tablename__ = "query_cache_store"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    query_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    vector_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    response_text: Mapped[str] = mapped_column(Text, nullable=False)
+    source_doc: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    hit_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    ttl_seconds: Mapped[int] = mapped_column(Integer, default=86400, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+
+
 class GraphCheckpointWrite(Base):
     """LangGraph 待处理写入，用于中断恢复时保留未提交的操作。"""
 

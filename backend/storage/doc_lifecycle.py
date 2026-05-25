@@ -40,9 +40,18 @@ def mark_document_deleted(filename: str) -> dict:
 
         session.commit()
 
+        # v6.0: 缓存失效
+        cache_invalidated = {}
+        try:
+            from backend.cache.invalidation import invalidate_by_filename
+            cache_invalidated = invalidate_by_filename(filename)
+        except Exception:
+            pass
+
         return {
             "filename": filename,
             "affected_chunks": result.rowcount,
             "status": "soft_deleted",
             "deleted_at": now.isoformat(),
+            "cache_invalidated": cache_invalidated,
         }

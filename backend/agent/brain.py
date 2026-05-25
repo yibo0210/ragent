@@ -280,6 +280,17 @@ def _prepare_messages(session_id: str, user_text: str) -> tuple[list, bool]:
 # ---------------------------------------------------------------------------
 def chat_with_agent(user_text: str, session_id: str = "default_session"):
     """使用 Supervisor 多智能体处理用户消息并返回响应。"""
+    # --- v6.0 语义缓存 ---
+    try:
+        from backend.cache import query_cache as cache_lookup
+        cached = cache_lookup(user_text)
+        if cached:
+            return {"response": cached["response"], "cached": True,
+                    "source": "semantic_cache"}
+    except Exception:
+        pass
+    # ---
+
     messages, _ = _prepare_messages(session_id, user_text)
 
     # 调用 Supervisor 图

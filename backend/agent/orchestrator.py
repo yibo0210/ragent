@@ -48,15 +48,8 @@ def _get_supervisor_model():
     """获取 Supervisor 路由决策模型（结构化输出）。"""
     global _supervisor_model
     if _supervisor_model is None:
-        _supervisor_model = init_chat_model(
-            model=SUPERVISOR_MODEL,
-            model_provider="openai",
-            api_key=API_KEY,
-            base_url=BASE_URL,
-            temperature=0,
-            max_tokens=MAX_TOKENS,
-            timeout=120,
-        )
+        from backend.agent.model_router import get_model_for_agent
+        _supervisor_model = get_model_for_agent("supervisor")
     return _supervisor_model
 
 
@@ -64,15 +57,8 @@ def _get_worker_model():
     """获取 Worker 回答生成模型。"""
     global _worker_model
     if _worker_model is None:
-        _worker_model = init_chat_model(
-            model=MODEL,
-            model_provider="openai",
-            api_key=API_KEY,
-            base_url=BASE_URL,
-            temperature=0.3,
-            max_tokens=MAX_TOKENS,
-            timeout=120,
-        )
+        from backend.agent.model_router import get_model_for_agent
+        _worker_model = get_model_for_agent("rag_specialist")
     return _worker_model
 
 

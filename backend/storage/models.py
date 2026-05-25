@@ -52,6 +52,7 @@ class ParentChunk(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     is_deleted: Mapped[bool] = mapped_column(default=False, nullable=False, index=True)
     version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    associated_media_urls: Mapped[str] = mapped_column(String(2048), default="", nullable=False)
 
 
 class GraphCheckpoint(Base):

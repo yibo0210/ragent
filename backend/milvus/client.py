@@ -64,7 +64,7 @@ class MilvusManager:
         return res
 #数据查询
     def query(self, filter_expr="", output_fields=None, limit=10000):
-        for attempt in range(2):
+        for attempt in range(3):
             try:
                 client = self._client()
                 return client.query(
@@ -74,10 +74,10 @@ class MilvusManager:
                     limit=limit
                 )
             except Exception as e:
-                if attempt == 0 and "closed channel" in str(e).lower():
+                if attempt < 2 and ("closed channel" in str(e).lower() or "RPC" in str(e)):
                     self._reconnect()
                     continue
-                if attempt > 0:
+                if attempt >= 2:
                     return []
         return []
 #数据删除

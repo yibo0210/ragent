@@ -19,6 +19,13 @@ class MilvusManager:
             self._client_instance = MilvusClient(uri=self.uri)
         return self._client_instance
 
+    def _ensure_connected(self):
+        """每次查询前检查连接健康，必要时重连。"""
+        try:
+            self._client().get_load_state(self.collection_name)
+        except Exception:
+            self._reconnect()
+
     def _reconnect(self):
         """重置 gRPC 连接，用于断线重连。"""
         if self._client_instance:
@@ -27,8 +34,10 @@ class MilvusManager:
             except Exception:
                 pass
         self._client_instance = MilvusClient(uri=self.uri)
+
 #集合初始化
     def init_collection(self):
+        self._ensure_connected()
         client = self._client()
         if not client.has_collection(self.collection_name):
             schema = client.create_schema(auto_id=True, enable_dynamic_field=True)
@@ -64,6 +73,7 @@ class MilvusManager:
         return res
 #数据查询
     def query(self, filter_expr="", output_fields=None, limit=10000):
+        self._ensure_connected()
         for attempt in range(3):
             try:
                 client = self._client()
@@ -145,6 +155,7 @@ class MilvusManager:
         import time
         from backend.observability import get_tracer, Metrics
 
+        self._ensure_connected()
         client = self._client()
         tracer = get_tracer("ragent.milvus")
         t0 = time.time()
@@ -189,13 +200,14 @@ class MilvusManager:
             return []
 
     def dense_retrieve(self, dense_embedding, top_k=5, filter_expr=""):
+        self._ensure_connected()
         client = self._client()
         try:
             results = client.search(
                 collection_name=self.collection_name,
                 data=[dense_embedding],
                 anns_field="dense_embedding",
-                param={"metric_type": "IP"},
+                search_params={"metric_type": "IP"},
                 limit=top_k,
                 filter=filter_expr,
                 output_fields=["text", "filename", "page_number"]

@@ -117,7 +117,7 @@ class MilvusManager:
             collection_name=self.CACHE_COLLECTION,
             data=[query_vector],
             anns_field="embedding",
-            param={"metric_type": "COSINE"},
+            search_params={"metric_type": "COSINE"},
             limit=top_k,
             output_fields=["query_hash", "query_text", "source_doc"],
         )

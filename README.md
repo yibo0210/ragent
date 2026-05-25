@@ -302,6 +302,16 @@ Neo4j Full Graph
 | **Cache Invalidation** | Document soft-delete triggers automatic cache eviction; TTL-based expiration for stale entries |
 | **Benchmark Script** | `scripts/run_benchmark.py` — concurrent stress test comparing cache hit/miss latency and Token savings |
 
+### Multimodal (v7.0)
+
+| Feature | Description |
+|---------|-------------|
+| **Layout Analysis** | PyMuPDF-based PDF layout detection — separates text paragraphs from tables/images before chunking |
+| **Media Extraction** | Image/table capture from PDF pages → MinIO object storage; chunks linked via `associated_media_urls` |
+| **VLM Description** | Qwen-VL generates Chinese markdown descriptions for charts and tables |
+| **Visual Retrieval** | 4th RRF channel: text-to-image-description semantic search via Milvus |
+| **Multimodal Agent** | `multimodal_specialist` — triggered by keywords (图表/曲线/图片), retrieves visuals + generates cited answers |
+
 ---
 
 ## Tech Stack
@@ -776,15 +786,23 @@ This will:
 - [x] TTL-based cache expiration
 - [x] Concurrent benchmark script (cache hit/miss latency + Token comparison)
 
-### v6.x — Planned
+### v7.0 — Multimodal Upgrade ✓
+
+- [x] PyMuPDF layout analysis for PDF (text/image/table separation)
+- [x] Image/table extraction + MinIO upload + associated_media_urls
+- [x] Qwen-VL chart/table description generation
+- [x] 4-channel RRF fusion (Dense + Sparse + Graph + Visual)
+- [x] Neo4j ImageNode/TableNode constraints
+- [x] Multimodal Specialist Agent (keyword-triggered visual retrieval)
+- [x] Supervisor routing updated with multimodal route
+
+### v7.x — Planned
 
 - [ ] Editable session names in sidebar
 - [ ] HITL state recovery on page refresh (polling endpoint)
 - [ ] Conversation export (Markdown / PDF)
 - [ ] Graph visualization panel in frontend (D3.js force graph)
 - [ ] Entity-level citation links in answers
-- [ ] Scheduled auto-run of community clustering after batch uploads
-- [ ] Graph extraction progress callback during upload
 
 ---
 

@@ -1,0 +1,53 @@
+version: '3.5'
+services:
+  mysql-ci:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: testpass
+      MYSQL_DATABASE: agent_chat_test
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis-ci:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  milvus-ci:
+    image: milvusdb/milvus:v2.5.0-beta
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    environment:
+      ETCD_ENDPOINTS: etcd-ci:2379
+      MINIO_ADDRESS: minio-ci:9000
+    depends_on:
+      - etcd-ci
+      - minio-ci
+
+  etcd-ci:
+    image: quay.io/coreos/etcd:v3.5.18
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: 1000
+    command: etcd -advertise-client-urls=http://etcd-ci:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+
+  minio-ci:
+    image: minio/minio:RELEASE.2024-05-28T17-19-04Z
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    command: server /data
+
+  neo4j-ci:
+    image: neo4j:5.26-community
+    environment:
+      NEO4J_AUTH: neo4j/testpass
+    ports:
+      - "7474:7474"
+      - "7687:7687"

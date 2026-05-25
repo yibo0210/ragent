@@ -1,0 +1,23 @@
+[
+  {
+    "id": "Q001",
+    "question": "什么是 GraphRAG？",
+    "ground_truth": "GraphRAG 是结合知识图谱和向量检索的 RAG 增强方案，通过实体关系网络实现多跳推理。",
+    "source_doc": "docs/graphrag_overview.pdf",
+    "query_type": "conceptual"
+  },
+  {
+    "id": "Q002",
+    "question": "Ragent AI 用了什么向量数据库？",
+    "ground_truth": "Ragent AI 使用 Milvus 2.5 作为向量数据库，支持 HNSW + SPARSE_INVERTED_INDEX 混合检索。",
+    "source_doc": "docs/README.md",
+    "query_type": "detail"
+  },
+  {
+    "id": "Q003",
+    "question": "系统如何实现多智能体协同？",
+    "ground_truth": "基于 LangGraph Supervisor-Workers 架构，Supervisor 进行意图路由，6 个专用 Agent 并行或串行处理任务。",
+    "source_doc": "docs/README.md",
+    "query_type": "conceptual"
+  }
+]

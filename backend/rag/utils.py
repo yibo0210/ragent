@@ -70,18 +70,25 @@ def _use_native_rerank_api() -> bool:
     return bool(RERANK_MODEL and RERANK_MODEL.startswith("qwen"))
 
 
+RRF_WEIGHT_DENSE = float(os.getenv("RRF_WEIGHT_DENSE", "0.4"))
+RRF_WEIGHT_SPARSE = float(os.getenv("RRF_WEIGHT_SPARSE", "0.3"))
+RRF_WEIGHT_GRAPH = float(os.getenv("RRF_WEIGHT_GRAPH", "0.3"))
+
+
 def rrf_fusion_three_channel(
     dense_results: list,
     sparse_results: list,
     graph_results: list,
     k: int = 60,
-    weights: tuple = (0.4, 0.3, 0.3),
+    weights: tuple = None,
     top_k: int = 10,
 ) -> list:
     """
     三通道 RRF 融合: Dense + Sparse + Graph。
     graph_results 来自图检索扩展。
     """
+    if weights is None:
+        weights = (RRF_WEIGHT_DENSE, RRF_WEIGHT_SPARSE, RRF_WEIGHT_GRAPH)
     w1, w2, w3 = weights
     scores = {}
 

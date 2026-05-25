@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      PYTHONPATH: .
+      DATABASE_URL: mysql+pymysql://root:testpass@localhost:3306/agent_chat_test
+      REDIS_URL: redis://localhost:6379/0
+      MILVUS_URI: http://localhost:19530
+      MILVUS_COLLECTION: test_collection
+      NEO4J_URI: bolt://localhost:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: testpass
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Start services
+        run: |
+          docker compose -f docker-compose.ci.yml up -d --wait
+          sleep 10
+
+      - name: Init database
+        run: |
+          uv run python -c "
+          from backend.storage.database import engine, Base
+          from backend.storage.models import *
+          Base.metadata.create_all(engine)
+          print('Database initialized')
+          "
+
+      - name: Run unit tests
+        run: uv run pytest tests/ -v --tb=short
+
+      - name: Run import verification
+        run: |
+          uv run python -c "
+          from backend.agent.orchestrator import supervisor_node
+          from backend.rag.utils import retrieve_documents
+          from backend.storage.graph_client import run_cypher
+          from backend.milvus.client import MilvusManager
+          from backend.evaluation.metrics import compute_ragas_metrics
+          print('All imports successful')
+          "
+
+      - name: Cleanup
+        if: always()
+        run: docker compose -f docker-compose.ci.yml down -v

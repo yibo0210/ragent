@@ -42,6 +42,16 @@ dependencies = [
     "pytest-mock>=3.14",
 ]
 
+"ragas>=0.2.0",
+    "datasets>=2.19.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short --strict-markers"
+
 [project.optional-dependencies]
 study = [
     "langchain-classic>=0.2.0",

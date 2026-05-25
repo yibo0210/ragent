@@ -114,29 +114,29 @@ def _format_docs(docs: List[dict]) -> str:
 
 def retrieve_initial(state: RAGState) -> RAGState:
     query = state["question"]
-    emit_rag_step("🔍", "正在检索知识库...", f"查询: {query[:50]}")
+    emit_rag_step("🔍", "混合检索 — Dense向量+BM25稀疏向量在Milvus中双路召回", f"查询: {query[:50]}")
     retrieved = retrieve_documents(query, top_k=5)
     results = retrieved.get("docs", [])
     retrieve_meta = retrieved.get("meta", {})
     context = _format_docs(results)
     emit_rag_step(
         "🧱",
-        "三级分块检索",
+        "三层分块 — L1(1200)→L2(600)→L3(300)层级检索，叶子节点向量索引",
         (
             f"叶子层 L{retrieve_meta.get('leaf_retrieve_level', 3)} 召回，"
-            f"候选 {retrieve_meta.get('candidate_k', 0)}"
+            f"候选 {retrieve_meta.get('candidate_k', 0)} 条"
         ),
     )
     emit_rag_step(
         "🧩",
-        "Auto-merging 合并",
+        "自动合并 — 同父块的L3叶子节点合并为L2/L1父块，还原完整上下文",
         (
             f"启用: {bool(retrieve_meta.get('auto_merge_enabled'))}，"
             f"应用: {bool(retrieve_meta.get('auto_merge_applied'))}，"
             f"替换片段: {retrieve_meta.get('auto_merge_replaced_chunks', 0)}"
         ),
     )
-    emit_rag_step("✅", f"检索完成，找到 {len(results)} 个片段", f"模式: {retrieve_meta.get('retrieval_mode', 'hybrid')}")
+    emit_rag_step("✅", f"检索完成 — 共召回 {len(results)} 个文档片段", f"模式: {retrieve_meta.get('retrieval_mode', 'hybrid')}")
     rag_trace = {
         "tool_used": True,
         "tool_name": "search_knowledge_base",
@@ -169,7 +169,7 @@ def retrieve_initial(state: RAGState) -> RAGState:
 
 def grade_documents_node(state: RAGState) -> RAGState:
     grader = _get_grader_model()
-    emit_rag_step("📊", "正在评估文档相关性...")
+    emit_rag_step("📊", "文档评分 — LLM 评估检索结果与问题的相关性（满分1分）")
     if not grader:
         grade_update = {
             "grade_score": "unknown",
@@ -194,9 +194,9 @@ def grade_documents_node(state: RAGState) -> RAGState:
         score = "yes" if "yes" in raw_text else "no"
     route = "generate_answer" if score == "yes" else "rewrite_question"
     if route == "generate_answer":
-        emit_rag_step("✅", "文档相关性评估通过", f"评分: {score}")
+        emit_rag_step("✅", f"评分通过 — 相关性得分 {score}，文档质量满足要求", f"评分: {score}")
     else:
-        emit_rag_step("⚠️", "文档相关性不足，将重写查询", f"评分: {score}")
+        emit_rag_step("⚠️", f"评分不足 — 相关性仅 {score}，低于阈值，启动查询重写", f"评分: {score}")
     grade_update = {
         "grade_score": score,
         "grade_route": route,
@@ -209,7 +209,7 @@ def grade_documents_node(state: RAGState) -> RAGState:
 
 def rewrite_question_node(state: RAGState) -> RAGState:
     question = state["question"]
-    emit_rag_step("✏️", "正在重写查询...")
+    emit_rag_step("✏️", "查询重写 — 生成退步问题+HyDE假设文档以扩展检索范围")
     router = _get_router_model()
     strategy = "step_back"
     if router:
@@ -234,14 +234,14 @@ def rewrite_question_node(state: RAGState) -> RAGState:
     hypothetical_doc = ""
 
     if strategy in ("step_back", "complex"):
-        emit_rag_step("🧠", f"使用策略: {strategy}", "生成退步问题")
+        emit_rag_step("🧠", f"策略选择: {strategy} — 退步问题抽象+概念层面扩展", "生成退步问题")
         step_back = step_back_expand(question)
         step_back_question = step_back.get("step_back_question", "")
         step_back_answer = step_back.get("step_back_answer", "")
         expanded_query = step_back.get("expanded_query", question)
 
     if strategy in ("hyde", "complex"):
-        emit_rag_step("📝", "HyDE 假设性文档生成中...")
+        emit_rag_step("📝", "HyDE — 生成假设性文档用于语义检索对齐")
         hypothetical_doc = generate_hypothetical_document(question)
 
     rag_trace = state.get("rag_trace", {}) or {}
@@ -262,7 +262,7 @@ def rewrite_question_node(state: RAGState) -> RAGState:
 
 def retrieve_expanded(state: RAGState) -> RAGState:
     strategy = state.get("expansion_type") or "step_back"
-    emit_rag_step("🔄", "使用扩展查询重新检索...", f"策略: {strategy}")
+    emit_rag_step("🔄", "扩展检索 — 用重写后的查询重新召回文档", f"策略: {strategy}")
     results: List[dict] = []
     rerank_applied_any = False
     rerank_enabled_any = False
@@ -351,7 +351,7 @@ def retrieve_expanded(state: RAGState) -> RAGState:
         item["rrf_rank"] = idx
 
     context = _format_docs(deduped)
-    emit_rag_step("✅", f"扩展检索完成，共 {len(deduped)} 个片段")
+    emit_rag_step("✅", f"扩展检索完成 — 去重后共 {len(deduped)} 个片段")
     rag_trace = state.get("rag_trace", {}) or {}
     rag_trace.update({
         "expanded_query": state.get("expanded_query") or state["question"],
@@ -410,7 +410,7 @@ def grade_after_expansion(state: RAGState) -> RAGState:
     force_interrupt = False
     if score != "yes":
         force_interrupt = True
-        emit_rag_step("🚨", f"第二次评分仍不通过 (fail_count={fail_count})，需人工干预")
+        emit_rag_step("🚨", f"两次评分均未通过 (fail={fail_count}次) — 触发HITL人工干预机制", "等待人工审核或修改查询")
 
     rag_trace = state.get("rag_trace", {}) or {}
     rag_trace.update({

@@ -169,6 +169,21 @@ createApp({
                                     reason: data.reason,
                                     timestamp: Date.now()
                                 });
+                                const agentNames = {
+                                    rag_specialist: '知识库专家',
+                                    local_graph_search: '局部图谱搜索',
+                                    global_graph_search: '全局图谱搜索',
+                                    web_searcher: '联网搜索',
+                                    data_analyst: '数据分析师',
+                                    direct_answer: '直接回答',
+                                    multimodal_specialist: '多模态专家',
+                                };
+                                const name = agentNames[data.agent] || data.agent;
+                                this.traceSteps.push({
+                                    timestamp: Date.now(),
+                                    agent: 'supervisor',
+                                    message: '路由 → ' + name + (data.reason ? '（' + data.reason + '）' : '')
+                                });
                             } else if (data.type === 'web_search_results') {
                                 this.messages[botIdx].webSearchResults = data.results || [];
                             } else if (data.type === 'agent_trace') {
@@ -180,7 +195,18 @@ createApp({
                                 } else {
                                     this.liveAgents.push({ name: data.agent, status: 'active' });
                                 }
-                                this.traceSteps.push({ timestamp: Date.now(), agent: data.agent, message: '开始回答' });
+                                const labels = {
+                                    supervisor: '分析意图并路由任务',
+                                    rag_specialist: '私有知识库混合检索',
+                                    local_graph_search: '向量+图谱多跳推理',
+                                    global_graph_search: '社区摘要全局匹配',
+                                    web_searcher: 'Tavily实时联网搜索',
+                                    data_analyst: 'Text-to-SQL数据分析',
+                                    direct_answer: '轻量直接回答',
+                                    multimodal_specialist: '多模态图表解读',
+                                };
+                                const desc = labels[data.agent] || '开始执行任务';
+                                this.traceSteps.push({ timestamp: Date.now(), agent: data.agent, message: desc });
                             } else if (data.type === 'agent_done') {
                                 const agent = this.liveAgents.find(a => a.name === data.agent);
                                 if (agent) agent.status = 'done';
@@ -198,12 +224,18 @@ createApp({
                                     agent: data.agent,
                                     message: '📊 ' + data.message
                                 });
+                            } else if (data.type === 'cache_hit') {
+                                this.traceSteps.push({
+                                    timestamp: Date.now(),
+                                    agent: 'system',
+                                    message: '语义缓存命中 — 相似度' + (data.similarity || 0) + '，直接返回缓存答案（0 Token，<200ms）'
+                                });
                             } else if (data.type === 'hitl_interrupt') {
                                 this.hitlState = data.data;
                                 this.hitlAction = null;
                                 this.hitlModifiedInput = '';
                                 this.isLoading = false;
-                                this.traceSteps.push({ timestamp: Date.now(), agent: 'system', message: 'HITL 中断，等待人工干预' });
+                                this.traceSteps.push({ timestamp: Date.now(), agent: 'system', message: 'HITL 中断 — 工作流挂起，等待人工决策' });
                             } else if (data.type === 'error') {
                                 this.messages[botIdx].isThinking = false;
                                 this.messages[botIdx].text += `\n[Error: ${data.content}]`;

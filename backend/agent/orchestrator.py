@@ -308,7 +308,7 @@ def rag_specialist_node(state: SupervisorState) -> dict:
 
     # Scenario A: RAG 低置信度 → HITL 中断
     if rag_result.get("force_interrupt"):
-        emit_rag_step("🛑", "RAG 检索置信度过低，请求人工干预")
+        emit_rag_step("🛑", "HITL 中断 — RAG检索置信度过低，挂起工作流等待人工决策")
         interrupt({
             "type": "hitl_rag_grade",
             "scenario": "low_confidence_rag",
@@ -438,17 +438,17 @@ def data_analyst_node(state: SupervisorState) -> dict:
                 user_query = msg.content
                 break
 
-    emit_rag_step("📊", "正在获取数据库结构...", agent="data_analyst")
+    emit_rag_step("📊", "Schema 发现 — Data Analyst 读取MySQL数据库表结构", agent="data_analyst")
     schema = get_schema_info()
 
-    emit_rag_step("🔍", "正在生成 SQL 查询...", agent="data_analyst")
+    emit_rag_step("🔍", "Text-to-SQL — LLM 将自然语言转为SQL查询语句", agent="data_analyst")
     sql = generate_sql(user_query, schema)
-    emit_rag_step("📝", f"SQL: {sql[:100]}", agent="data_analyst")
+    emit_rag_step("📝", f"生成SQL — {sql[:100]}", agent="data_analyst")
 
     result = execute_sql(sql)
 
     if result.get("error") == "non_select":
-        emit_rag_step("🛑", "检测到非 SELECT 语句，请求人工审核", agent="data_analyst")
+        emit_rag_step("🛑", "HITL 审核 — 检测到非SELECT语句，需人工批准后执行", agent="data_analyst")
         interrupt({
             "type": "hitl_sql_approval",
             "scenario": "non_select_sql",
@@ -457,7 +457,7 @@ def data_analyst_node(state: SupervisorState) -> dict:
             "message": "数据分析师生成了非 SELECT SQL 语句，请审核是否批准执行。",
         })
 
-    emit_rag_step("✅", f"查询完成，返回 {result.get('row_count', 0)} 行", agent="data_analyst")
+    emit_rag_step("✅", f"SQL执行完成 — 返回 {result.get('row_count', 0)} 行数据", agent="data_analyst")
     context = format_sql_result(result)
 
     model = _get_worker_model()
@@ -528,14 +528,14 @@ def local_graph_search_node(state: SupervisorState) -> dict:
             "mode": "at_or_after",
         }
 
-    emit_graph_step("🔍", "正在检索知识图谱...", agent="local_graph_search")
+    emit_graph_step("🔍", "局部图谱检索 — Milvus向量定位实体 → Neo4j 1-hop外扩邻居", agent="local_graph_search")
     with tracer.start_as_current_span("agent.local_graph_search") as span:
         span.set_attribute("query", user_query[:200])
         result = safe_graph_search(user_query)
 
     emit_graph_step(
         "🔗",
-        f"图谱外扩: {len(result.get('graph_triples', []))} 条关系",
+        f"图谱外扩完成 — Neo4j返回 {len(result.get('graph_triples', []))} 条实体关系三元组",
         agent="local_graph_search",
     )
 
@@ -569,10 +569,10 @@ def global_graph_search_node(state: SupervisorState) -> dict:
                 user_query = msg.content
                 break
 
-    emit_graph_step("📊", "正在匹配社区摘要...", agent="global_graph_search")
+    emit_graph_step("📊", "全局图谱检索 — Milvus社区摘要向量匹配（Leiden聚类生成）", agent="global_graph_search")
     result = global_graph_search(user_query)
     n_summaries = len(result.get("summaries", []))
-    emit_graph_step("✅", f"匹配到 {n_summaries} 个社区摘要", agent="global_graph_search")
+    emit_graph_step("✅", f"摘要匹配完成 — 命中 {n_summaries} 个相关社区综述", agent="global_graph_search")
 
     model = _get_worker_model()
     prompt = f"根据以下社区摘要信息，给出一份综合分析回答。\n\n{result['context']}\n\n## 用户问题\n\n{user_query}"

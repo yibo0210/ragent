@@ -15,6 +15,8 @@
 from typing import Annotated, Literal, Optional, TypedDict
 import os
 import time
+import json
+import re
 
 from dotenv import load_dotenv
 from backend.observability import get_tracer, get_logger, Metrics
@@ -237,7 +239,6 @@ def supervisor_node(state: SupervisorState) -> dict:
                 break
 
     # 调用 Supervisor LLM 进行路由决策（手动 JSON 解析）
-    import re
     model = _get_supervisor_model()
     route_prompt = SUPERVISOR_SYSTEM_PROMPT + (
         '\n\n请严格输出JSON格式，不要包含其他内容：\n'

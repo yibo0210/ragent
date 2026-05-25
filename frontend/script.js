@@ -274,11 +274,6 @@ createApp({
                 if (!res.ok) throw new Error('Failed');
                 const data = await res.json();
                 this.sessions = data.sessions;
-                if (this.sessions.length > 0) {
-                    const latest = this.sessions[0];
-                    this.sessionId = latest.session_id;
-                    await this.loadSessionMessages(latest.session_id);
-                }
             } catch (e) {
                 console.error('Error loading sessions:', e);
             } finally {

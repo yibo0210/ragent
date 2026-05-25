@@ -3,6 +3,8 @@ from .graph_client import write_cypher
 
 CONSTRAINTS = [
     "CREATE CONSTRAINT entity_name_unique IF NOT EXISTS FOR (e:Entity) REQUIRE e.name IS UNIQUE",
+    "CREATE CONSTRAINT imagenode_id_unique IF NOT EXISTS FOR (n:ImageNode) REQUIRE n.media_id IS UNIQUE",
+    "CREATE CONSTRAINT tablenode_id_unique IF NOT EXISTS FOR (n:TableNode) REQUIRE n.media_id IS UNIQUE",
 ]
 
 INDEXES = [

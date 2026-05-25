@@ -72,7 +72,8 @@ def _use_native_rerank_api() -> bool:
 
 RRF_WEIGHT_DENSE = float(os.getenv("RRF_WEIGHT_DENSE", "0.4"))
 RRF_WEIGHT_SPARSE = float(os.getenv("RRF_WEIGHT_SPARSE", "0.3"))
-RRF_WEIGHT_GRAPH = float(os.getenv("RRF_WEIGHT_GRAPH", "0.3"))
+RRF_WEIGHT_GRAPH = float(os.getenv("RRF_WEIGHT_GRAPH", "0.15"))
+RRF_WEIGHT_VISUAL = float(os.getenv("RRF_WEIGHT_VISUAL", "0.15"))
 
 
 def rrf_fusion_three_channel(
@@ -88,7 +89,7 @@ def rrf_fusion_three_channel(
     graph_results 来自图检索扩展。
     """
     if weights is None:
-        weights = (RRF_WEIGHT_DENSE, RRF_WEIGHT_SPARSE, RRF_WEIGHT_GRAPH)
+        weights = (RRF_WEIGHT_DENSE, RRF_WEIGHT_SPARSE, RRF_WEIGHT_GRAPH, RRF_WEIGHT_VISUAL)
     w1, w2, w3 = weights
     scores = {}
 
@@ -104,6 +105,11 @@ def rrf_fusion_three_channel(
         key = doc.get("chunk_id") or doc.get("text", "")[:50]
         scores[key] = scores.get(key, 0) + w3 / (k + rank)
 
+    if visual_results:
+        for rank, (doc, _) in enumerate(visual_results, 1):
+            key = doc.get("chunk_id") or doc.get("text", "")[:50]
+            scores[key] = scores.get(key, 0) + w4 / (k + rank)
+
     all_docs = {}
     for doc, _ in dense_results:
         all_docs[doc.get("chunk_id") or doc.get("text", "")[:50]] = doc
@@ -111,6 +117,9 @@ def rrf_fusion_three_channel(
         all_docs[doc.get("chunk_id") or doc.get("text", "")[:50]] = doc
     for doc, _ in graph_results:
         all_docs[doc.get("chunk_id") or doc.get("text", "")[:50]] = doc
+    if visual_results:
+        for doc, _ in visual_results:
+            all_docs[doc.get("chunk_id") or doc.get("text", "")[:50]] = doc
 
     ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
     return [all_docs[k] for k, _ in ranked[:top_k]]

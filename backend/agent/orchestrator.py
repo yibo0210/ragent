@@ -148,6 +148,11 @@ SUPERVISOR_SYSTEM_PROMPT = """你是一个智能路由调度员。你的职责�
 - 结构化数据查询（如"最近的消息有哪些"）
 - 数据汇总、聚合分析
 
+### multimodal_specialist（多模态专家）
+当用户问题涉及视觉/图表内容时路由至此：
+- 提到"图表"、"曲线"、"图片"、"趋势图"、"柱状图"、"饼图"、"示意图"
+- 涉及图像解读、图表分析等需求
+
 ## 时序路由规则
 如果用户问题涉及时间跨度（如"去年"、"2023年到2025年"、"最近"、"最新的"、"X年的"），设置 is_temporal=true 并提取 temporal_year，优先路由到 local_graph_search。
 
@@ -255,7 +260,7 @@ def supervisor_node(state: SupervisorState) -> dict:
         temporal_year = ""
 
     # 过滤无效路由，去重
-    valid = {"rag_specialist", "web_searcher", "direct_answer", "data_analyst", "local_graph_search", "global_graph_search"}
+    valid = {"rag_specialist", "web_searcher", "direct_answer", "data_analyst", "local_graph_search", "global_graph_search", "multimodal_specialist"}
     routes = [r for r in routes if r in valid]
     if not routes:
         routes = ["direct_answer"]
@@ -587,6 +592,12 @@ def global_graph_search_node(state: SupervisorState) -> dict:
     }
 
 
+def multimodal_specialist_node(state: SupervisorState) -> dict:
+    """多模态专家节点：视觉检索 + 引用回答。"""
+    from backend.agent.multimodal_specialist import multimodal_specialist_node as _impl
+    return _impl(state)
+
+
 def synthesize_node(state: SupervisorState) -> dict:
     """Synthesize 节点：汇总并行 Worker 结果，生成聚合回答。"""
     worker_outputs = state.get("worker_outputs", {})
@@ -675,6 +686,7 @@ def build_supervisor_graph(checkpointer=None):
     graph.add_node("local_graph_search", local_graph_search_node)
     graph.add_node("global_graph_search", global_graph_search_node)
     graph.add_node("direct_answer", direct_answer_node)
+    graph.add_node("multimodal_specialist", multimodal_specialist_node)
     graph.add_node("synthesize", synthesize_node)
 
     # 设置入口

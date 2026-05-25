@@ -33,13 +33,6 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # --- v5.0 可观测性 ---
-    from backend.observability import init_logging, init_tracing, init_metrics
-    init_logging()
-    init_tracing(app)
-    init_metrics(app)
-    # ---
-
     # No-cache middleware for development
     @app.middleware("http")
     async def _no_cache(request, call_next):
@@ -53,7 +46,14 @@ def create_app() -> FastAPI:
 
     app.include_router(router)
 
-    # serve frontend static files at root
+    # --- v5.0 可观测性 (must be after router + before static mount) ---
+    from backend.observability import init_logging, init_tracing, init_metrics
+    init_logging()
+    init_tracing(app)
+    init_metrics(app)
+    # ---
+
+    # serve frontend static files at root (must be last — overrides all paths)
     if FRONTEND_DIR.exists():
         app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="static")
 

@@ -40,9 +40,7 @@ dependencies = [
     "python-louvain>=0.16",
     "pytest>=8.0",
     "pytest-mock>=3.14",
-]
-
-"ragas>=0.2.0",
+    "ragas>=0.2.0",
     "datasets>=2.19.0",
 ]
 

@@ -45,6 +45,23 @@ createApp({
             const renderer = new marked.Renderer();
             renderer.code = function(code, language) {
                 const lang = (language || '').split(' ')[0];
+                // v9: Echarts 图表渲染
+                if (lang === 'echarts') {
+                    const chartId = 'echarts-' + Math.random().toString(36).substr(2, 9);
+                    // 延迟渲染，等 DOM 挂载后初始化
+                    setTimeout(() => {
+                        try {
+                            const el = document.getElementById(chartId);
+                            if (el && typeof echarts !== 'undefined') {
+                                const chart = echarts.init(el);
+                                const config = JSON.parse(code);
+                                chart.setOption(config);
+                                window.addEventListener('resize', () => chart.resize());
+                            }
+                        } catch (e) { console.warn('Echarts render error:', e); }
+                    }, 100);
+                    return `<div id="${chartId}" class="echarts-chart" style="width:100%;height:400px;margin:16px 0;border-radius:8px;background:var(--bg-card)"></div>`;
+                }
                 const highlighted = hljs.getLanguage(lang)
                     ? hljs.highlight(code, { language: lang }).value
                     : hljs.highlight(code, { language: 'plaintext' }).value;
@@ -177,6 +194,8 @@ createApp({
                                     data_analyst: '数据分析师',
                                     direct_answer: '直接回答',
                                     multimodal_specialist: '多模态专家',
+                                    planner: '任务规划',
+                                    critique: '事实核查',
                                 };
                                 const name = agentNames[data.agent] || data.agent;
                                 this.traceSteps.push({
@@ -204,6 +223,8 @@ createApp({
                                     data_analyst: 'Text-to-SQL数据分析',
                                     direct_answer: '轻量直接回答',
                                     multimodal_specialist: '多模态图表解读',
+                                    planner: '分解复杂查询为多步计划',
+                                    critique: '交叉验证回答与检索依据',
                                 };
                                 const desc = labels[data.agent] || '开始执行任务';
                                 this.traceSteps.push({ timestamp: Date.now(), agent: data.agent, message: desc });
@@ -229,6 +250,45 @@ createApp({
                                     timestamp: Date.now(),
                                     agent: 'system',
                                     message: '语义缓存命中 — 相似度' + (data.similarity || 0) + '，直接返回缓存答案（0 Token，<200ms）'
+                                });
+                            } else if (data.type === 'plan_generated') {
+                                // v8: 显示 Planner 生成的查询计划
+                                const stepDescs = (data.steps || []).map(s => s.query || s.agent).join(' → ');
+                                this.traceSteps.push({
+                                    timestamp: Date.now(),
+                                    agent: 'planner',
+                                    message: '查询计划: ' + (stepDescs || '简单查询，无需拆解')
+                                });
+                            } else if (data.type === 'critique_feedback') {
+                                // v8: 显示 Critique 事实核查结果
+                                const icon = data.is_valid ? '通过' : '驳回';
+                                const msg = data.is_valid ? '事实核查通过' : '事实核查驳回: ' + (data.feedback || '');
+                                this.traceSteps.push({
+                                    timestamp: Date.now(),
+                                    agent: 'critique',
+                                    message: msg
+                                });
+                            } else if (data.type === 'self_correction') {
+                                // v8: 自纠错循环
+                                this.traceSteps.push({
+                                    timestamp: Date.now(),
+                                    agent: 'critique',
+                                    message: '自纠错 — ' + (data.message || '正在补充信息...')
+                                });
+                            } else if (data.type === 'mcp_tool_call') {
+                                // v9: MCP 工具调用
+                                this.traceSteps.push({
+                                    timestamp: Date.now(),
+                                    agent: data.agent || 'data_analyst',
+                                    message: '调用外部系统: ' + (data.server_name || '') + '/' + (data.tool_name || '')
+                                });
+                            } else if (data.type === 'mcp_tool_result') {
+                                // v9: MCP 工具结果
+                                const summary = (data.result_summary || '').substring(0, 100);
+                                this.traceSteps.push({
+                                    timestamp: Date.now(),
+                                    agent: data.agent || 'data_analyst',
+                                    message: '外部系统返回: ' + summary + (data.is_error ? ' (错误)' : '')
                                 });
                             } else if (data.type === 'hitl_interrupt') {
                                 this.hitlState = data.data;
@@ -621,7 +681,9 @@ createApp({
                 'data_analyst': { icon: 'fas fa-chart-bar', text: '数据分析', color: '#f59e0b' },
                 'direct_answer': { icon: 'fas fa-robot', text: '直接回答', color: '#8b5cf6' },
                 'local_graph_search': { icon: 'fas fa-project-diagram', text: '图谱检索', color: '#ec4899' },
-                'global_graph_search': { icon: 'fas fa-globe', text: '全局图谱', color: '#14b8a6' }
+                'global_graph_search': { icon: 'fas fa-globe', text: '全局图谱', color: '#14b8a6' },
+                'planner': { icon: 'fas fa-sitemap', text: '任务规划', color: '#6366f1' },
+                'critique': { icon: 'fas fa-check-double', text: '事实核查', color: '#f97316' }
             };
             return labels[agent] || { icon: 'fas fa-cog', text: agent || '未知', color: '#6b7280' };
         },

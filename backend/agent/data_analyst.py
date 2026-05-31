@@ -1,6 +1,7 @@
 """Data Analyst Agent - Text-to-SQL Worker
 
 将自然语言问题转为 MySQL 只读 SQL 查询并执行，以结构化数据回答用户。
+v9: 支持 MCP 外部数据源（PostgreSQL、Salesforce 等）。
 """
 import os
 import re
@@ -12,6 +13,72 @@ from sqlalchemy import text
 from backend.storage.database import SessionLocal
 
 load_dotenv()
+
+
+# ---------------------------------------------------------------------------
+# v9: MCP 数据源支持
+# ---------------------------------------------------------------------------
+async def get_mcp_data_sources() -> list[dict]:
+    """从 MCP Manager 获取可用的数据库类工具。"""
+    from .mcp_client import get_mcp_manager
+    manager = get_mcp_manager()
+    all_tools = manager.get_all_tools()
+    db_tools = []
+    for server_name, tools in all_tools.items():
+        for tool_def in tools:
+            name = tool_def.get("name", "")
+            desc = tool_def.get("description", "")
+            # 识别数据库类工具（名称或描述包含 query/sql/database/fetch）
+            keywords = ["query", "sql", "database", "fetch", "select", "search", "get", "list", "find"]
+            if any(kw in name.lower() or kw in desc.lower() for kw in keywords):
+                db_tools.append({
+                    "server_name": server_name,
+                    "tool_name": name,
+                    "description": desc,
+                    "input_schema": tool_def.get("input_schema", {}),
+                })
+    return db_tools
+
+
+async def generate_mcp_query(question: str, tool_schema: dict) -> dict:
+    """根据 MCP 工具的 inputSchema 生成查询参数。"""
+    from .orchestrator import _get_worker_model
+
+    model = _get_worker_model()
+    schema_desc = tool_schema.get("description", "")
+    properties = tool_schema.get("input_schema", {}).get("properties", {})
+    required = tool_schema.get("input_schema", {}).get("required", [])
+
+    prompt = f"""你是一个数据分析师。根据用户问题和工具的输入规范，生成查询参数。
+
+工具名称: {tool_schema.get('tool_name', '')}
+工具描述: {schema_desc}
+输入参数:
+"""
+    for param_name, param_def in properties.items():
+        req = " (必填)" if param_name in required else " (可选)"
+        prompt += f"  - {param_name}: {param_def.get('description', param_def.get('type', 'string'))}{req}\n"
+
+    prompt += f"\n用户问题: {question}\n\n请输出 JSON 格式的参数，只输出 JSON，不要解释。"
+
+    try:
+        response = model.invoke([HumanMessage(content=prompt)])
+        content = response.content if hasattr(response, "content") else str(response)
+        # 提取 JSON
+        json_match = re.search(r'\{[^{}]*\}', content, re.DOTALL)
+        if json_match:
+            import json
+            return json.loads(json_match.group())
+    except Exception:
+        pass
+    return {}
+
+
+async def execute_mcp_query(server_name: str, tool_name: str, arguments: dict) -> dict:
+    """调用 MCP Server 执行查询。"""
+    from .mcp_client import get_mcp_manager
+    manager = get_mcp_manager()
+    return await manager.call_tool(server_name, tool_name, arguments)
 
 SQL_GENERATION_PROMPT = """你是一个数据分析师。根据用户问题和数据库 schema，生成一条 MySQL SELECT 查询。
 
@@ -160,3 +227,16 @@ def format_sql_result(result: dict) -> str:
     if len(rows) > 20:
         lines.append(f"... 还有 {len(rows) - 20} 行未显示")
     return "\n".join(lines)
+
+
+def format_mcp_result(result: dict) -> str:
+    """将 MCP 工具返回结果格式化为 LLM 可读文本。"""
+    if result.get("error"):
+        return f"MCP 调用失败: {result['error']}"
+    content = result.get("content", "")
+    if not content:
+        return "MCP 返回结果为空。"
+    # 截断过长内容
+    if len(content) > 3000:
+        content = content[:3000] + f"\n... (截断，共 {len(content)} 字符)"
+    return content

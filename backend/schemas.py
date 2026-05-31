@@ -143,3 +143,44 @@ class GraphRelation(BaseModel):
     description: str = ""
     weight: float = 0.5
     source_chunks: list[str] = []
+
+
+class QueryPlan(BaseModel):
+    """Planner 生成的查询计划。"""
+    is_complex: bool = False
+    steps: list[dict] = []
+    reasoning: str = ""
+
+
+class CritiqueResult(BaseModel):
+    """Critique 评估结果。"""
+    is_valid: bool = True
+    missing_information: list[str] = []
+    feedback: str = ""
+    confidence: float = 1.0
+
+
+class MCPToolCall(BaseModel):
+    """MCP 工具调用事件。"""
+    server_name: str
+    tool_name: str
+    arguments: dict = {}
+    agent: str = "data_analyst"
+
+
+class MCPToolResult(BaseModel):
+    """MCP 工具调用结果。"""
+    server_name: str
+    tool_name: str
+    result_summary: str = ""
+    is_error: bool = False
+
+
+class QueryPlanStep(BaseModel):
+    """Planner DAG 步骤。"""
+    step_id: int
+    tool_name: str = ""
+    agent: str = "data_analyst"
+    query: str = ""
+    dependencies: list[int] = []
+    input_mapping: dict = {}

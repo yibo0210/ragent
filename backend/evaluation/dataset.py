@@ -16,3 +16,7 @@ def get_questions() -> list[str]:
 
 def get_ground_truths() -> list[str]:
     return [item["ground_truth"] for item in load_golden_dataset()]
+
+
+def get_expected_agents() -> list[str | None]:
+    return [item.get("expected_agent") for item in load_golden_dataset()]

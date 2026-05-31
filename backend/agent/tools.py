@@ -230,3 +230,98 @@ def search_web(query: str) -> str:
         return f"Web search failed: {result['error']}"
 
     return context if context else "No web search results found."
+
+
+# ---------------------------------------------------------------------------
+# v9: MCP 动态工具注册
+# ---------------------------------------------------------------------------
+def mcp_tools_to_langchain_tools(mcp_tools: list[dict], server_name: str) -> list:
+    """将 MCP 工具 Schema 转换为 LangChain Tool 对象。
+
+    Args:
+        mcp_tools: MCP tools/list 返回的工具列表 [{name, description, input_schema}]
+        server_name: MCP Server 名称，用于调用时路由
+
+    Returns:
+        LangChain Tool 对象列表
+    """
+    from langchain_core.tools import StructuredTool
+    from pydantic import create_model, Field
+
+    tools = []
+    for tool_def in mcp_tools:
+        name = tool_def.get("name", "")
+        description = tool_def.get("description", "")
+        input_schema = tool_def.get("input_schema", {})
+
+        # 从 JSON Schema 构建 Pydantic 模型
+        properties = input_schema.get("properties", {})
+        required_fields = set(input_schema.get("required", []))
+        field_defs = {}
+        for param_name, param_def in properties.items():
+            param_type = _json_type_to_python(param_def.get("type", "string"))
+            default = ... if param_name in required_fields else None
+            field_defs[param_name] = (param_type, Field(default, description=param_def.get("description", "")))
+
+        if field_defs:
+            args_model = create_model(f"{name}_args", **field_defs)
+        else:
+            args_model = None
+
+        def _make_caller(sn, tn):
+            def caller(**kwargs):
+                import asyncio
+                from .mcp_client import get_mcp_manager
+                manager = get_mcp_manager()
+                loop = asyncio.get_event_loop()
+                result = loop.run_until_complete(manager.call_tool(sn, tn, kwargs))
+                if result.get("error"):
+                    return f"错误: {result['error']}"
+                return result.get("content", "")
+            return caller
+
+        tool_obj = StructuredTool(
+            name=name,
+            description=description,
+            func=_make_caller(server_name, name),
+            args_schema=args_model,
+        )
+        tools.append(tool_obj)
+
+    return tools
+
+
+def _json_type_to_python(json_type: str) -> type:
+    """JSON Schema 类型映射到 Python 类型。"""
+    mapping = {
+        "string": str,
+        "integer": int,
+        "number": float,
+        "boolean": bool,
+        "array": list,
+        "object": dict,
+    }
+    return mapping.get(json_type, str)
+
+
+def get_dynamic_tools(server_name: str = None) -> list:
+    """获取动态 MCP 工具。
+
+    Args:
+        server_name: 指定 Server 名称，None 则返回所有
+
+    Returns:
+        LangChain Tool 对象列表
+    """
+    from .mcp_client import get_mcp_manager
+    manager = get_mcp_manager()
+
+    all_tools = []
+    if server_name:
+        tools = manager.get_available_tools(server_name)
+        all_tools.extend(mcp_tools_to_langchain_tools(tools, server_name))
+    else:
+        for name, tools in manager.get_all_tools().items():
+            all_tools.extend(mcp_tools_to_langchain_tools(tools, name))
+
+    return all_tools

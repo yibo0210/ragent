@@ -80,17 +80,20 @@ def rrf_fusion_three_channel(
     dense_results: list,
     sparse_results: list,
     graph_results: list,
+    visual_results: list = None,
     k: int = 60,
     weights: tuple = None,
     top_k: int = 10,
 ) -> list:
     """
-    三通道 RRF 融合: Dense + Sparse + Graph。
-    graph_results 来自图检索扩展。
+    多通道 RRF 融合: Dense + Sparse + Graph + Visual。
     """
     if weights is None:
         weights = (RRF_WEIGHT_DENSE, RRF_WEIGHT_SPARSE, RRF_WEIGHT_GRAPH, RRF_WEIGHT_VISUAL)
-    w1, w2, w3 = weights
+    w1, w2, w3 = weights[0], weights[1], weights[2]
+    w4 = weights[3] if len(weights) > 3 else 0.0
+    if visual_results is None:
+        visual_results = []
     scores = {}
 
     for rank, (doc, _) in enumerate(dense_results, 1):
@@ -105,10 +108,9 @@ def rrf_fusion_three_channel(
         key = doc.get("chunk_id") or doc.get("text", "")[:50]
         scores[key] = scores.get(key, 0) + w3 / (k + rank)
 
-    if visual_results:
-        for rank, (doc, _) in enumerate(visual_results, 1):
-            key = doc.get("chunk_id") or doc.get("text", "")[:50]
-            scores[key] = scores.get(key, 0) + w4 / (k + rank)
+    for rank, (doc, _) in enumerate(visual_results, 1):
+        key = doc.get("chunk_id") or doc.get("text", "")[:50]
+        scores[key] = scores.get(key, 0) + w4 / (k + rank)
 
     all_docs = {}
     for doc, _ in dense_results:
@@ -117,9 +119,8 @@ def rrf_fusion_three_channel(
         all_docs[doc.get("chunk_id") or doc.get("text", "")[:50]] = doc
     for doc, _ in graph_results:
         all_docs[doc.get("chunk_id") or doc.get("text", "")[:50]] = doc
-    if visual_results:
-        for doc, _ in visual_results:
-            all_docs[doc.get("chunk_id") or doc.get("text", "")[:50]] = doc
+    for doc, _ in visual_results:
+        all_docs[doc.get("chunk_id") or doc.get("text", "")[:50]] = doc
 
     ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
     return [all_docs[k] for k, _ in ranked[:top_k]]

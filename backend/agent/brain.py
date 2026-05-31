@@ -473,9 +473,73 @@ async def chat_with_agent_stream(user_text: str, session_id: str = "default_sess
                                 content = getattr(last_msg, "content", "")
                                 if content:
                                     full_response = content
+                            # v8: 保存 draft_answer
+                            if update.get("draft_answer"):
+                                full_response = update["draft_answer"]
                         # 单 Worker 情形：synthesize 返回空 {} → update=None
                         if not full_response:
                             pass
+
+                    elif node_name == "planner":
+                        # v8: Planner 节点
+                        if update is None:
+                            continue
+                        plan = update.get("query_plan", {})
+                        await output_queue.put({
+                            "type": "agent_start",
+                            "agent": "planner",
+                            "timestamp": asyncio.get_event_loop().time(),
+                        })
+                        await output_queue.put({
+                            "type": "plan_generated",
+                            "plan": plan,
+                            "reasoning": plan.get("reasoning", ""),
+                            "steps": plan.get("steps", []),
+                        })
+                        await output_queue.put({
+                            "type": "agent_done",
+                            "agent": "planner",
+                            "timestamp": asyncio.get_event_loop().time(),
+                        })
+
+                    elif node_name == "critique":
+                        # v8: Critique 节点
+                        if update is None:
+                            continue
+                        result = update.get("critique_result", {})
+                        await output_queue.put({
+                            "type": "agent_start",
+                            "agent": "critique",
+                            "timestamp": asyncio.get_event_loop().time(),
+                        })
+                        await output_queue.put({
+                            "type": "critique_feedback",
+                            "is_valid": result.get("is_valid", True),
+                            "feedback": result.get("feedback", ""),
+                            "missing_information": result.get("missing_information", []),
+                        })
+                        if not result.get("is_valid", True):
+                            await output_queue.put({
+                                "type": "self_correction",
+                                "message": f"检测到依据不足，正在补充信息...",
+                            })
+                        await output_queue.put({
+                            "type": "agent_done",
+                            "agent": "critique",
+                            "timestamp": asyncio.get_event_loop().time(),
+                        })
+
+                    elif node_name == "replan":
+                        # v8: Replan 节点
+                        retry = update.get("retry_count", 0) if update else 0
+                        await output_queue.put({
+                            "type": "rag_step",
+                            "step": {
+                                "icon": "🔄",
+                                "label": f"自纠错 — 根据核查反馈重新规划 (重试 {retry}/2)",
+                                "agent": "critique",
+                            },
+                        })
 
         except Exception as e:
             await output_queue.put({"type": "error", "content": str(e)})

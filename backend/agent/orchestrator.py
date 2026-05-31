@@ -104,6 +104,15 @@ class SupervisorState(TypedDict):
     worker_outputs: dict
     # 人类介入时的输入指令或修正文本
     human_interfered_input: str
+    # v8: 自适应推理状态
+    query_plan: Optional[dict]          # Planner 生成的分步计划
+    critique_result: Optional[dict]     # Critique 评估结果
+    retry_count: int                    # 当前重试次数（防止死循环）
+    draft_answer: str                   # Synthesize 生成的草稿答案
+    is_hallucinated: bool               # 幻觉标记
+    plan_steps_completed: list[str]     # 已完成的计划步骤
+    # v9: MCP 工具状态
+    tool_outputs: dict                  # {step_id: output_data} MCP 调用结果
 
 
 # ---------------------------------------------------------------------------
@@ -272,7 +281,7 @@ def supervisor_node(state: SupervisorState) -> dict:
         temporal_year = ""
 
     # 过滤无效路由，去重
-    valid = {"rag_specialist", "web_searcher", "direct_answer", "data_analyst", "local_graph_search", "global_graph_search", "multimodal_specialist"}
+    valid = {"rag_specialist", "web_searcher", "direct_answer", "data_analyst", "local_graph_search", "global_graph_search", "multimodal_specialist", "planner"}
     routes = [r for r in routes if r in valid]
     if not routes:
         routes = ["direct_answer"]
@@ -439,9 +448,11 @@ def web_searcher_node(state: SupervisorState) -> dict:
 
 
 def data_analyst_node(state: SupervisorState) -> dict:
-    """Data Analyst 节点：Text-to-SQL 查询并生成回答。"""
+    """Data Analyst 节点：Text-to-SQL 查询并生成回答。v9: 支持 MCP 外部数据源。"""
     from .data_analyst import get_schema_info, generate_sql, execute_sql, format_sql_result
+    from .data_analyst import get_mcp_data_sources, generate_mcp_query, execute_mcp_query, format_mcp_result
     from .tools import emit_rag_step
+    from .mcp_client import get_mcp_manager
 
     user_query = state.get("user_query", "")
     if not user_query:
@@ -450,6 +461,16 @@ def data_analyst_node(state: SupervisorState) -> dict:
                 user_query = msg.content
                 break
 
+    # v9: 检查是否有 MCP 数据源可用
+    import asyncio
+    mcp_sources = []
+    try:
+        loop = asyncio.get_event_loop()
+        mcp_sources = loop.run_until_complete(get_mcp_data_sources())
+    except Exception:
+        pass
+
+    # 本地 MySQL 查询
     emit_rag_step("📊", "Schema 发现 — Data Analyst 读取MySQL数据库表结构", agent="data_analyst")
     schema = get_schema_info()
 
@@ -470,10 +491,47 @@ def data_analyst_node(state: SupervisorState) -> dict:
         })
 
     emit_rag_step("✅", f"SQL执行完成 — 返回 {result.get('row_count', 0)} 行数据", agent="data_analyst")
-    context = format_sql_result(result)
+    local_context = format_sql_result(result)
+
+    # v9: MCP 数据源查询
+    mcp_results = []
+    if mcp_sources:
+        emit_rag_step("🔗", f"发现 {len(mcp_sources)} 个 MCP 数据源，正在查询...", agent="data_analyst")
+        for source in mcp_sources[:3]:  # 最多查 3 个
+            try:
+                tool_schema = {
+                    "tool_name": source["tool_name"],
+                    "description": source["description"],
+                    "input_schema": source.get("input_schema", {}),
+                }
+                args = loop.run_until_complete(generate_mcp_query(user_query, tool_schema))
+                if args:
+                    emit_rag_step("📡", f"调用 {source['server_name']}/{source['tool_name']}", agent="data_analyst")
+                    mcp_result = loop.run_until_complete(
+                        execute_mcp_query(source["server_name"], source["tool_name"], args)
+                    )
+                    mcp_results.append({
+                        "server": source["server_name"],
+                        "tool": source["tool_name"],
+                        "result": mcp_result,
+                    })
+            except Exception as e:
+                mcp_results.append({
+                    "server": source["server_name"],
+                    "tool": source["tool_name"],
+                    "result": {"error": str(e)},
+                })
+
+    # 组合上下文
+    context = f"## 本地 MySQL 查询结果\n\n{local_context}"
+    if mcp_results:
+        context += "\n\n## MCP 外部数据源查询结果\n"
+        for mr in mcp_results:
+            formatted = format_mcp_result(mr["result"])
+            context += f"\n### {mr['server']}/{mr['tool']}\n{formatted}\n"
 
     model = _get_worker_model()
-    prompt = f"{DATA_ANALYST_PROMPT}\n\n## 查询结果\n\n{context}\n\n## 用户问题\n\n{user_query}\n\n## 执行的 SQL\n\n{sql}"
+    prompt = f"{DATA_ANALYST_PROMPT}\n\n{context}\n\n## 用户问题\n\n{user_query}"
     answer = _stream_answer(model, [HumanMessage(content=prompt)])
 
     data_trace = {
@@ -481,6 +539,8 @@ def data_analyst_node(state: SupervisorState) -> dict:
         "tool_name": "data_analyst",
         "sql": sql,
         "result": result,
+        "mcp_sources": len(mcp_sources),
+        "mcp_results": [{"server": mr["server"], "tool": mr["tool"]} for mr in mcp_results],
     }
     agent_trace = state.get("agent_trace") or {}
     agent_trace["data_analyst_trace"] = data_trace
@@ -614,8 +674,12 @@ def synthesize_node(state: SupervisorState) -> dict:
     """Synthesize 节点：汇总并行 Worker 结果，生成聚合回答。"""
     worker_outputs = state.get("worker_outputs", {})
 
-    # 单 Worker 无需聚合
+    # 单 Worker 无需聚合，直接提取答案
     if len(worker_outputs) <= 1:
+        for agent_name, output in worker_outputs.items():
+            answer = output.get("answer", "") if isinstance(output, dict) else str(output)
+            if answer:
+                return {"draft_answer": answer}
         return {}
 
     # 多 Worker：LLM 聚合
@@ -656,7 +720,180 @@ def synthesize_node(state: SupervisorState) -> dict:
 
     answer = _stream_answer(model, [HumanMessage(content=synthesis_prompt)])
 
-    return {"messages": [AIMessage(content=answer)]}
+    return {"messages": [AIMessage(content=answer)], "draft_answer": answer}
+
+
+# ---------------------------------------------------------------------------
+# v8: Planner / Critique / Replan 节点
+# ---------------------------------------------------------------------------
+PLANNER_PROMPT = """你是一个任务规划专家。分析用户问题，判断是否需要多步执行。
+
+规则：
+- 简单问题（单次检索可回答）：返回 is_complex=false
+- 复杂问题（需要多跳推理、跨文档关联、多来源综合）：拆解为 2-4 个步骤
+- 每个步骤指定 agent 和子查询
+- 可用 agent: rag_specialist, local_graph_search, global_graph_search, web_searcher, data_analyst
+- v9: 步骤支持 DAG 依赖关系（dependencies）和数据传递（input_mapping）
+- 如果有 critique_feedback（之前回答被驳回），据此调整计划补充缺失信息
+
+输出严格JSON格式：
+{"is_complex": bool, "steps": [{"step_id": 1, "agent": "...", "query": "...", "tool_name": "", "dependencies": [], "input_mapping": {}}], "reasoning": "..."}"""
+
+CRITIQUE_PROMPT = """你是一个严格的事实核查专家。检查以下回答是否完全基于提供的上下文。
+
+规则：
+- 逐条检查回答中的事实声明
+- 每个声明必须能在上下文中找到直接依据
+- 如果有声明无法验证或明显编造，标记 is_valid=false
+- 提供 missing_information 列表说明缺失哪些关键信息
+
+上下文：
+{contexts}
+
+草稿回答：
+{draft_answer}
+
+用户问题：
+{user_query}
+
+输出严格JSON格式：
+{{"is_valid": bool, "missing_information": ["..."], "feedback": "...", "confidence": 0.0-1.0}}"""
+
+
+def planner_node(state: SupervisorState) -> dict:
+    """Planner 节点：将复杂查询拆解为多步执行计划。"""
+    from .model_router import get_model_for_agent
+
+    user_query = state.get("user_query", "")
+    if not user_query:
+        for msg in reversed(state["messages"]):
+            if isinstance(msg, HumanMessage):
+                user_query = msg.content
+                break
+
+    critique_feedback = ""
+    critique_result = state.get("critique_result")
+    if critique_result and not critique_result.get("is_valid", True):
+        critique_feedback = f"\n\n之前的回答被驳回，原因：{critique_result.get('feedback', '')}\n缺失信息：{', '.join(critique_result.get('missing_information', []))}"
+
+    model = get_model_for_agent("supervisor")
+    prompt = PLANNER_PROMPT + f"\n\n用户问题：{user_query}{critique_feedback}"
+
+    try:
+        response = model.invoke([HumanMessage(content=prompt)])
+        content = response.content if hasattr(response, "content") else str(response)
+        json_match = re.search(r'\{[^{}]*"steps"\s*:\s*\[[^\]]*\][^{}]*\}', content, re.DOTALL)
+        if json_match:
+            plan = json.loads(json_match.group())
+        else:
+            plan = {"is_complex": False, "steps": [], "reasoning": "解析失败，降级为简单路由"}
+    except Exception:
+        plan = {"is_complex": False, "steps": [], "reasoning": "Planner 调用失败"}
+
+    agent_trace = state.get("agent_trace") or {}
+    agent_trace["plan"] = plan
+
+    log.info("planner_decision", is_complex=plan.get("is_complex"), steps=len(plan.get("steps", [])))
+
+    return {
+        "query_plan": plan,
+        "agent_trace": agent_trace,
+    }
+
+
+def critique_node(state: SupervisorState) -> dict:
+    """Critique 节点：交叉验证草稿回答与检索依据。"""
+    from .model_router import get_model_for_agent
+
+    # 提取草稿答案
+    draft = state.get("draft_answer", "")
+    if not draft:
+        result_messages = state.get("messages", [])
+        if result_messages:
+            last_msg = result_messages[-1]
+            draft = getattr(last_msg, "content", "")
+
+    if not draft:
+        return {"critique_result": {"is_valid": True, "feedback": "无草稿答案", "confidence": 1.0}}
+
+    # 提取上下文
+    contexts = []
+    worker_outputs = state.get("worker_outputs", {})
+    for agent_name, output in worker_outputs.items():
+        if isinstance(output, dict):
+            trace = output.get("trace", {})
+            if isinstance(trace, dict):
+                chunks = trace.get("retrieved_chunks", [])
+                if isinstance(chunks, list):
+                    for chunk in chunks:
+                        if isinstance(chunk, dict) and chunk.get("text"):
+                            contexts.append(chunk["text"])
+
+    user_query = state.get("user_query", "")
+    context_text = "\n\n---\n\n".join(contexts[:10]) if contexts else "未检索到上下文"
+
+    model = get_model_for_agent("supervisor")
+    prompt = CRITIQUE_PROMPT.format(
+        contexts=context_text[:3000],
+        draft_answer=draft[:2000],
+        user_query=user_query,
+    )
+
+    try:
+        response = model.invoke([HumanMessage(content=prompt)])
+        content = response.content if hasattr(response, "content") else str(response)
+        json_match = re.search(r'\{[^{}]*"is_valid"\s*:\s*(?:true|false)[^{}]*\}', content, re.DOTALL)
+        if json_match:
+            result = json.loads(json_match.group())
+        else:
+            result = {"is_valid": True, "feedback": "Critique 解析失败，默认通过", "confidence": 0.5}
+    except Exception:
+        result = {"is_valid": True, "feedback": "Critique 调用失败", "confidence": 0.5}
+
+    retry = state.get("retry_count", 0)
+    log.info("critique_result", is_valid=result.get("is_valid"), retry=retry)
+
+    return {
+        "critique_result": result,
+        "is_hallucinated": not result.get("is_valid", True),
+    }
+
+
+def replan_node(state: SupervisorState) -> dict:
+    """Replan 节点：根据 Critique 反馈重新规划查询。"""
+    critique = state.get("critique_result", {})
+    missing = critique.get("missing_information", [])
+    feedback = critique.get("feedback", "")
+    retry = state.get("retry_count", 0) + 1
+
+    # 构建补充查询
+    original_query = state.get("user_query", "")
+    supplement = f"补充查询：{original_query}\n需要补充的信息：{', '.join(missing)}"
+    if feedback:
+        supplement += f"\n反馈：{feedback}"
+
+    return {
+        "user_query": supplement,
+        "retry_count": retry,
+        "worker_outputs": {},
+        "draft_answer": "",
+        "query_plan": None,
+        "critique_result": None,
+        "is_hallucinated": False,
+    }
+
+
+def route_after_critique(state: SupervisorState) -> str:
+    """Critique 后的条件路由。"""
+    critique = state.get("critique_result", {})
+    retry = state.get("retry_count", 0)
+
+    if critique.get("is_valid", True):
+        return "end"
+    elif retry < 2:
+        return "replan"
+    else:
+        return "end"
 
 
 # ---------------------------------------------------------------------------
@@ -664,6 +901,21 @@ def synthesize_node(state: SupervisorState) -> dict:
 # ---------------------------------------------------------------------------
 def route_supervisor(state: SupervisorState):
     """根据 Supervisor 决策返回目标节点。支持 Send 并行调度。"""
+    # v8: 如果有 query_plan（来自 planner），按计划步骤路由
+    plan = state.get("query_plan")
+    if plan and plan.get("is_complex") and plan.get("steps"):
+        valid_agents = {"rag_specialist", "web_searcher", "data_analyst",
+                        "local_graph_search", "global_graph_search", "multimodal_specialist"}
+        sends = []
+        for step in plan["steps"]:
+            agent = step.get("agent", "rag_specialist")
+            if agent in valid_agents:
+                step_state = {**state, "user_query": step.get("query", state.get("user_query", ""))}
+                sends.append(Send(agent, step_state))
+        if sends:
+            return sends
+
+    # 原有逻辑
     workers = state.get("next_workers", [])
     if not workers:
         workers = [state.get("next_worker", "direct_answer")]
@@ -672,12 +924,17 @@ def route_supervisor(state: SupervisorState):
     if workers == ["direct_answer"]:
         return "direct_answer"
 
+    # v8: 如果路由到 planner，直接返回
+    if workers == ["planner"]:
+        return "planner"
+
     # 其他情况用 Send fan-out 到各 Worker
     sends = []
     for worker in workers:
         if worker == "direct_answer":
-            # direct_answer 直接结束，不经过 synthesize
             sends.append(Send("direct_answer", state))
+        elif worker == "planner":
+            return "planner"
         else:
             sends.append(Send(worker, state))
     return sends
@@ -687,11 +944,12 @@ def route_supervisor(state: SupervisorState):
 # 构建 Supervisor 图
 # ---------------------------------------------------------------------------
 def build_supervisor_graph(checkpointer=None):
-    """构建并编译 Supervisor LangGraph 状态机。"""
+    """构建并编译 Supervisor LangGraph 状态机（v8: 含 Planner/Critique/Replan）。"""
     graph = StateGraph(SupervisorState)
 
-    # 添加节点
+    # 节点注册
     graph.add_node("supervisor", supervisor_node)
+    graph.add_node("planner", planner_node)
     graph.add_node("rag_specialist", rag_specialist_node)
     graph.add_node("web_searcher", web_searcher_node)
     graph.add_node("data_analyst", data_analyst_node)
@@ -700,28 +958,37 @@ def build_supervisor_graph(checkpointer=None):
     graph.add_node("direct_answer", direct_answer_node)
     graph.add_node("multimodal_specialist", multimodal_specialist_node)
     graph.add_node("synthesize", synthesize_node)
+    graph.add_node("critique", critique_node)
+    graph.add_node("replan", replan_node)
 
-    # 设置入口
+    # 入口
     graph.set_entry_point("supervisor")
 
-    # Supervisor 条件路由（支持 Send fan-out）
-    graph.add_conditional_edges(
-        "supervisor",
-        route_supervisor,
-    )
+    # Supervisor 条件路由（支持 planner 和 Send fan-out）
+    graph.add_conditional_edges("supervisor", route_supervisor)
 
-    # Worker -> Synthesize
-    graph.add_edge("rag_specialist", "synthesize")
-    graph.add_edge("web_searcher", "synthesize")
-    graph.add_edge("data_analyst", "synthesize")
-    graph.add_edge("local_graph_search", "synthesize")
-    graph.add_edge("global_graph_search", "synthesize")
+    # Worker -> Synthesize（数据分析师和直接回答跳过 Critique）
+    for worker in ["rag_specialist", "web_searcher",
+                   "local_graph_search", "global_graph_search", "multimodal_specialist"]:
+        graph.add_edge(worker, "synthesize")
 
-    # Synthesize -> END
-    graph.add_edge("synthesize", END)
+    # Synthesize -> Critique（v8: 不再直接到 END）
+    graph.add_edge("synthesize", "critique")
 
-    # Direct Answer 直接结束
+    # Direct Answer -> END（闲聊无需 Critique 校验）
     graph.add_edge("direct_answer", END)
+
+    # Data Analyst -> END（SQL 查询结果是结构化数据，非 RAG 检索上下文，Critique 会误判）
+    graph.add_edge("data_analyst", END)
+
+    # Critique 条件路由
+    graph.add_conditional_edges("critique", route_after_critique, {
+        "end": END,
+        "replan": "replan",
+    })
+
+    # Replan -> Supervisor（重新路由）
+    graph.add_edge("replan", "supervisor")
 
     return graph.compile(checkpointer=checkpointer)
 

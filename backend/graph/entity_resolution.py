@@ -12,7 +12,7 @@ def find_candidates_in_community(community_id: str = None) -> list[dict]:
     MATCH (a:Entity)
     WHERE a.community_id IS NOT NULL
     MATCH (b:Entity)
-    WHERE b.community_id = a.community_id AND id(a) < id(b)
+    WHERE b.community_id = a.community_id AND id(a) < id(b) AND a.type = b.type
     WITH a, b, a.community_id AS cid
     WHERE a.name <> b.name
     RETURN a.name AS name_a, b.name AS name_b, cid AS community_id

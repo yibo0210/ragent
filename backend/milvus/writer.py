@@ -56,6 +56,7 @@ class MilvusWriter:
                     "parent_chunk_id": doc.get("parent_chunk_id", ""),
                     "root_chunk_id": doc.get("root_chunk_id", ""),
                     "chunk_level": int(doc.get("chunk_level", 0)),
+                    "is_deleted": False,
                 }
                 for doc, dense_emb, sparse_emb in zip(batch, dense_embeddings, sparse_embeddings)
             ]

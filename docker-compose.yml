@@ -72,6 +72,39 @@ services:
     networks:
       - default
 
+  mysql:
+    container_name: ragent-mysql
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: password
+      MYSQL_DATABASE: agent_chat
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - default
+
+  redis:
+    container_name: ragent-redis
+    image: redis:7.2-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - default
+
   neo4j:
     container_name: ragent-neo4j
     image: neo4j:5.26-community
@@ -133,6 +166,60 @@ services:
     networks:
       - default
 
+  api:
+    container_name: ragent-api
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["uv", "run", "python", "start.py"]
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    depends_on:
+      standalone:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./data:/app/data
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+    networks:
+      - default
+
+  worker:
+    container_name: ragent-worker
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["uv", "run", "python", "start_worker.py"]
+    env_file:
+      - .env
+    depends_on:
+      standalone:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./data:/app/data
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+    networks:
+      - default
+
 volumes:
   etcd_data:
   minio_data:
@@ -140,6 +227,8 @@ volumes:
   neo4j_data:
   neo4j_logs:
   grafana_data:
+  mysql_data:
+  redis_data:
 
 networks:
   default:

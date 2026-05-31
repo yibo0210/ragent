@@ -1,5 +1,6 @@
 """Neo4j 图清理：移除失效 chunk 引用、回收孤立节点。"""
 from backend.storage.graph_client import run_cypher
+from backend.storage.doc_lifecycle import get_chunk_ids_by_filename
 
 
 def strip_chunk_from_edges(chunk_ids: list[str]) -> dict:
@@ -48,3 +49,11 @@ def full_cascade_cleanup(chunk_ids: list[str]) -> dict:
         "empty_edges_deleted": empty_deleted,
         "orphan_nodes_deleted": orphan_deleted,
     }
+
+
+def cleanup_by_filename(filename: str) -> dict:
+    """按文件名清理图谱数据：移除关联边和孤立节点。"""
+    chunk_ids = get_chunk_ids_by_filename(filename, include_deleted=True)
+    if not chunk_ids:
+        return {"edges_updated": 0, "empty_edges_deleted": 0, "orphan_nodes_deleted": 0}
+    return full_cascade_cleanup(chunk_ids)

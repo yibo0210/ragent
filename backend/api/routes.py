@@ -170,14 +170,44 @@ async def upload_document(file: UploadFile = File(...)):
             # 1. 保存文件
             yield f'data: {json.dumps({"type": "progress", "stage": "saving", "current": 0, "total": 0, "status": "正在保存文件..."})}\n\n'
             os.makedirs(UPLOAD_DIR, exist_ok=True)
-            milvus_manager.init_collection()
-            milvus_manager.delete(f'filename == "{filename}"')
-            parent_chunk_store.delete_by_filename(filename)
-
             file_path = UPLOAD_DIR / filename
             content = await file.read()
             with open(file_path, "wb") as f:
                 f.write(content)
+
+            # 1.1 文件指纹 — 跳过内容未变的重复上传
+            from backend.documents.fingerprint import compute_file_hash
+            from backend.storage.doc_lifecycle import upsert_document_index
+            file_hash = compute_file_hash(str(file_path))
+            index_result = upsert_document_index(filename, file_hash, 0)
+            if index_result["action"] == "skipped":
+                yield f'data: {json.dumps({"type": "complete", "filename": filename, "chunks": 0, "status": "unchanged", "message": f"文件内容未变化，跳过处理：{filename}"})}\n\n'
+                return
+
+            # 1.2 尝试异步队列分派（Redis 可用时后台处理，不可用时回退同步）
+            job_id = None
+            try:
+                from backend.pipeline.task_queue import get_redis_settings
+                from arq import create_pool
+                pool = await create_pool(get_redis_settings())
+                job = await pool.enqueue_job("run_ingestion_task", filename, str(file_path), file_hash)
+                await pool.close()
+                job_id = job.job_id if job else None
+            except Exception:
+                job_id = None
+
+            if job_id is not None:
+                yield f'data: {json.dumps({"type": "complete", "filename": filename, "chunks": 0, "status": "queued", "job_id": job_id, "message": f"文档已提交后台处理：{filename}"})}\n\n'
+                return
+
+            # 1.3 Redis 不可用 — 回退到同步处理
+            # 1.4 内容有变 — 清理旧数据后继续处理
+            milvus_manager.init_collection()
+            milvus_manager.delete(f'filename == "{filename}"')
+            parent_chunk_store.delete_by_filename(filename)
+            from backend.storage.graph_cleanup import cleanup_by_filename
+            cleanup_stats = cleanup_by_filename(filename)
+            yield f'data: {json.dumps({"type": "rag_step", "step": "graph_cleanup", "detail": cleanup_stats})}\n\n'
 
             # 2. 解析文档
             yield f'data: {json.dumps({"type": "progress", "stage": "parsing", "current": 0, "total": 0, "status": "正在解析文档..."})}\n\n'
@@ -245,7 +275,10 @@ async def upload_document(file: UploadFile = File(...)):
                     print(f"[GRAPH] Extraction failed (non-fatal): {e}")
                     yield f'data: {json.dumps({"type": "progress", "stage": "graph", "status": f"图谱抽取跳过: {e}"})}\n\n'
 
-            # 6. 完成
+            # 6. 更新文档索引（最终 chunk 数量）
+            upsert_document_index(filename, file_hash, total_chunks)
+
+            # 7. 完成
             yield f'data: {json.dumps({"type": "complete", "filename": filename, "chunks": total_chunks, "message": f"成功上传：{filename}"})}\n\n'
 
         except Exception as e:
@@ -313,3 +346,40 @@ async def hitl_resume_endpoint(request: HitlResumeRequest):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# ====================== MCP 管理接口 ======================
+@router.post("/mcp/connect")
+async def mcp_connect(server_name: str, url: str, transport: str = "stdio", args: list[str] = None):
+    """连接到 MCP Server。"""
+    from backend.agent.mcp_client import get_mcp_manager
+    manager = get_mcp_manager()
+    success = await manager.connect(server_name, url, transport, args=args)
+    if not success:
+        raise HTTPException(status_code=500, detail=f"连接 MCP Server '{server_name}' 失败")
+    tools = manager.get_available_tools(server_name)
+    return {"server_name": server_name, "tools_count": len(tools), "tools": tools}
+
+
+@router.get("/mcp/servers")
+async def mcp_list_servers():
+    """列出所有已连接的 MCP Server。"""
+    from backend.agent.mcp_client import get_mcp_manager
+    manager = get_mcp_manager()
+    servers = manager.list_servers()
+    result = {}
+    for name in servers:
+        result[name] = {
+            "connected": manager.is_connected(name),
+            "tools": manager.get_available_tools(name),
+        }
+    return {"servers": result}
+
+
+@router.post("/mcp/disconnect/{server_name}")
+async def mcp_disconnect(server_name: str):
+    """断开指定 MCP Server。"""
+    from backend.agent.mcp_client import get_mcp_manager
+    manager = get_mcp_manager()
+    await manager.disconnect(server_name)
+    return {"server_name": server_name, "status": "disconnected"}

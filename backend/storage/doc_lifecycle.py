@@ -55,3 +55,43 @@ def mark_document_deleted(filename: str) -> dict:
             "deleted_at": now.isoformat(),
             "cache_invalidated": cache_invalidated,
         }
+
+
+def upsert_document_index(filename: str, file_hash: str, chunk_count: int) -> dict:
+    """Upsert DocumentIndex: 创建/更新/跳过文档索引记录。
+
+    Returns:
+        {"action": "created"|"skipped"|"updated", "old_hash": str, "new_hash": str}
+    """
+    with SessionLocal() as session:
+        now = datetime.now(timezone.utc)
+        doc = session.query(DocumentIndex).filter_by(filename=filename).first()
+
+        if doc is None:
+            # 新文档 — INSERT
+            doc = DocumentIndex(
+                filename=filename,
+                file_hash=file_hash,
+                chunk_count=chunk_count,
+                is_deleted=False,
+                version=1,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(doc)
+            session.commit()
+            return {"action": "created", "old_hash": "", "new_hash": file_hash}
+
+        if doc.file_hash == file_hash:
+            # 内容未变 — 跳过
+            return {"action": "skipped", "old_hash": doc.file_hash, "new_hash": file_hash}
+
+        # 内容变化 — UPDATE
+        old_hash = doc.file_hash
+        doc.file_hash = file_hash
+        doc.chunk_count = chunk_count
+        doc.is_deleted = False
+        doc.version += 1
+        doc.updated_at = now
+        session.commit()
+        return {"action": "updated", "old_hash": old_hash, "new_hash": file_hash}

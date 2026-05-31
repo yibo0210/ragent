@@ -71,7 +71,7 @@ Ragent AI is a production-ready **multi-agent GraphRAG platform** that orchestra
 │  └───────────┬─────────────┘  └─────────────────────────────────────┘  │
 │              │                                                          │
 │  ┌───────────▼──────────────────────────────────────────────────────┐  │
-│  │            LangGraph Supervisor-Workers Orchestrator              │  │
+│  │            LangGraph Supervisor-Workers Orchestrator (v8)        │  │
 │  │                                                                   │  │
 │  │                     ┌──────────────┐                              │  │
 │  │                     │  Supervisor  │  (Intent Routing)            │  │
@@ -84,15 +84,25 @@ Ragent AI is a production-ready **multi-agent GraphRAG platform** that orchestra
 │  │  └──────┬──────┘  └───────┬──────┘  └─────────┬─────────┘   │    │  │
 │  │         │                  │                   │             │    │  │
 │  │  ┌──────▼──────┐  ┌───────▼──────┐  ┌─────────▼─────────┐   │    │  │
-│  │  │ Web Searcher│  │ Data Analyst │  │ Direct Answer     │   │    │  │
-│  │  │ (Tavily)    │  │ (Text-to-SQL)│  │                   │   │    │  │
-│  │  └──────┬──────┘  └───────┬──────┘  └─────────┬─────────┘   │    │  │
-│  │         └──────────────────┼───────────────────┘             │    │  │
+│  │  │ Web Searcher│  │ Data Analyst │  │ Direct Answer→END │   │    │  │
+│  │  │ (Tavily)    │  │ (Text-to-SQL)│  │ (skip Critique)   │   │    │  │
+│  │  └──────┬──────┘  └───────┬──────┘  └───────────────────┘   │    │  │
+│  │         └──────────────────┼─────────────────────────────┘   │    │  │
 │  │                            │                                 │    │  │
 │  │                     ┌──────▼───────┐                         │    │  │
 │  │                     │  Synthesize  │ ← Multi-Worker Merge    │    │  │
-│  │                     └──────────────┘                         │    │  │
-│  └──────────────────────────┬──────────────────────────────────────┘  │
+│  │                     └──────┬───────┘                         │    │  │
+│  │                            │                                 │    │  │
+│  │                     ┌──────▼───────┐                         │    │  │
+│  │                     │   Critique   │ ← Fact-checking (v8)   │    │  │
+│  │                     └──────┬───────┘                         │    │  │
+│  │                   valid │   │ invalid, retry<2               │    │  │
+│  │                    ┌────┘   └────┐                           │    │  │
+│  │                    ▼             ▼                           │    │  │
+│  │                   END       ┌─────────┐                     │    │  │
+│  │                             │ Replan  │ → Supervisor (v8)   │    │  │
+│  │                             └─────────┘                     │    │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
 │                             │                                           │
 │  ┌──────────────────────────▼───────────────────────────────────────┐  │
 │  │                     RAG Pipeline (LangGraph)                      │  │
@@ -119,7 +129,7 @@ Ragent AI is a production-ready **multi-agent GraphRAG platform** that orchestra
 └───────────────┘  └──────────────────────┘  └───────────────┘  └────────┘
 ```
 
-### Agent Routing Flow
+### Agent Routing Flow (v8)
 
 ```
                          ┌──────────────┐
@@ -133,11 +143,11 @@ Ragent AI is a production-ready **multi-agent GraphRAG platform** that orchestra
                                 │
           ┌─────────────────────┼─────────────────────────────┐
           │                     │                             │
- ┌────────▼────────┐  ┌────────▼────────┐  ┌─────────────────▼──┐
- │ RAG Specialist  │  │ Local Graph     │  │ Global Graph       │
- │ (Doc retrieval) │  │ Search          │  │ Search             │
- │                 │  │ (Vector→Neo4j   │  │ (Community Summary │
- │                 │  │  entity expand) │  │  matching)         │
+          ▼                     ▼                             ▼
+ ┌─────────────────┐  ┌────────▼────────┐  ┌─────────────────▼──┐
+ │   Planner (v8)  │  │ RAG Specialist  │  │ Local/Global Graph │
+ │ Complex query   │  │ (Doc retrieval) │  │ Search             │
+ │ decomposition   │  │                 │  │                    │
  └────────┬────────┘  └────────┬────────┘  └────────┬───────────┘
           │                    │                     │
           └────────────────────┼─────────────────────┘
@@ -146,9 +156,10 @@ Ragent AI is a production-ready **multi-agent GraphRAG platform** that orchestra
           │                    │                     │
  ┌────────▼────────┐  ┌────────▼────────┐  ┌─────────▼─────────┐
  │  Web Searcher   │  │  Data Analyst   │  │  Direct Answer    │
- │  (Tavily API)   │  │  (Text-to-SQL)  │  │  (Chat/General)   │
- └────────┬────────┘  └────────┬────────┘  └─────────┬─────────┘
-          │                    │                      │
+ │  (Tavily API)   │  │  (Text-to-SQL)  │  │  → END (skip      │
+ │                 │  │                 │  │    Critique)       │
+ └────────┬────────┘  └────────┬────────┘  └───────────────────┘
+          │                    │
           └────────────────────┼──────────────────────┘
                                │
                     ┌──────────▼──────────┐
@@ -156,9 +167,20 @@ Ragent AI is a production-ready **multi-agent GraphRAG platform** that orchestra
                     │  (Merge Answers)    │    Aggregation
                     └──────────┬──────────┘
                                │
-                         ┌─────▼─────┐
-                         │  Answer   │
-                         └───────────┘
+                    ┌──────────▼──────────┐
+                    │     Critique (v8)   │ ← Fact-checking
+                    │  (Cross-verify with │
+                    │   retrieved context)│
+                    └──────────┬──────────┘
+                               │
+                    ┌──────────┼──────────┐
+                    │                     │
+                 valid                invalid, retry<2
+                    │                     │
+                    ▼                     ▼
+               ┌─────────┐         ┌───────────┐
+               │  Answer  │         │  Replan   │ → Supervisor
+               └─────────┘         └───────────┘   (self-correction)
 ```
 
 ### Document Ingestion Flow
@@ -199,12 +221,15 @@ Neo4j Full Graph
 | Feature | Description |
 |---------|-------------|
 | **Supervisor Router** | LLM-powered intent analysis for intelligent agent selection (supports single + parallel dispatch via LangGraph `Send`) |
+| **Planner (v8)** | Complex query decomposition: breaks multi-hop questions into step-by-step execution plans targeting different agents |
 | **RAG Specialist** | Full RAG pipeline: hybrid retrieval → rerank → auto-merge → grading → rewrite → expanded retrieval |
 | **Local Graph Search** | Vector search → Neo4j entity lookup → 1-hop graph expansion → merged context for multi-hop reasoning |
 | **Global Graph Search** | Direct community summary matching in Milvus for panoramic/overview questions |
 | **Web Searcher** | Tavily API integration for real-time web search with automatic fallback to RAG on API failure |
 | **Data Analyst** | Text-to-SQL worker: discovers schema → generates read-only SQL → executes → presents insights |
 | **Direct Answer** | Handles greetings, chitchat, and general knowledge queries without retrieval overhead |
+| **Critique (v8)** | Post-generation fact-checking: cross-verifies draft answer against retrieved contexts; triggers self-correction loop on hallucination |
+| **Replan (v8)** | Self-correction: injects missing information as supplement queries and re-routes to Supervisor (max 2 retries) |
 | **Parallel Dispatch** | Supervisor can route to multiple workers simultaneously; synthesize node aggregates results |
 
 ### GraphRAG Engine
@@ -274,11 +299,16 @@ Neo4j Full Graph
 
 | Feature | Description |
 |---------|-------------|
-| **Golden Dataset** | 50 hand-crafted QA pairs covering conceptual and detail queries across all system features |
-| **Ragas Metrics** | Automated faithfulness, answer relevancy, and context precision scoring |
-| **RRF Grid Search** | `scripts/grid_search_rrf.py` — 0.1-step traversal of normalized weight combinations, auto-selects best |
+| **Golden Dataset** | 80 hand-crafted QA pairs across 7 query types (conceptual, detail, cross_doc, global_summary, realtime, chat, data_query) with `expected_agent` for routing accuracy |
+| **Ragas Metrics** | 4 metrics (ragas 0.2.15): context_precision, context_recall, faithfulness, answer_relevancy; composite score for optimization. Note: `answer_relevancy` and `context_recall` may return NaN due to DashScope API prompt format incompatibility |
+| **3 Evaluation Modes** | `retrieval` (initial retrieval only), `pipeline` (full RAG pipeline), `e2e` (LLM generates real answer + routing accuracy + latency stats) |
+| **Routing Accuracy** | Supervisor LLM routing vs `expected_agent` comparison, per-query-type breakdown |
+| **RRF Grid Search** | `scripts/grid_search_rrf.py` — composite score optimization (0.4×precision + 0.3×faithfulness + 0.3×relevancy), graph channel support |
+| **A/B Comparison** | `--compare` flag generates diff report with metric deltas between two evaluation runs |
+| **HTML Report** | `scripts/generate_report.py` — radar chart, bar chart, routing matrix, latency distribution |
+| **CI Threshold Check** | `scripts/ci_evaluation.sh` — context_precision ≥ 0.6, faithfulness ≥ 0.7, answer_relevancy ≥ 0.6 |
+| **Unit Tests** | `tests/test_evaluation.py` — golden dataset validation, RRF fusion, metrics signatures |
 | **CI/CD Pipeline** | GitHub Actions: Docker services → DB init → pytest → import verification on every push |
-| **Visualization** | `scripts/run_evaluation.py` generates radar chart + per-query-type bar chart via matplotlib |
 
 ### Observability & High Availability (v5.0)
 
@@ -311,6 +341,51 @@ Neo4j Full Graph
 | **VLM Description** | Qwen-VL generates Chinese markdown descriptions for charts and tables |
 | **Visual Retrieval** | 4th RRF channel: text-to-image-description semantic search via Milvus |
 | **Multimodal Agent** | `multimodal_specialist` — triggered by keywords (图表/曲线/图片), retrieves visuals + generates cited answers |
+
+### Adaptive Reasoning & Self-Correction (v8.0)
+
+| Feature | Description |
+|---------|-------------|
+| **Planner Node** | Complex query decomposition into multi-step execution plans; simple queries bypass planner |
+| **Critique Node** | Post-generation fact-checking: cross-verifies draft answer against retrieved contexts via LLM |
+| **Self-Correction Loop** | Critique → replan → supervisor (max 2 retries); injects missing information as supplement queries |
+| **direct_answer Bypass** | Chat/chitchat queries skip Critique (no retrieved context to validate against) |
+| **data_analyst Bypass** | SQL query results skip Critique (structured data, not RAG-retrieved context) |
+
+### MCP Integration (v9.0)
+
+| Feature | Description |
+|---------|-------------|
+| **MCP Connection Manager** | `MCPConnectionManager` manages connections to multiple MCP Servers (SSE/stdio transport) |
+| **Dynamic Tool Registration** | MCP `tools/list` Schema → LangChain `StructuredTool` auto-conversion |
+| **Tool Semantic Retriever** | Milvus-based top-k tool recall prevents context window explosion (100+ tools) |
+| **Data Analyst Multi-Source** | Automatically discovers MCP database tools and queries them alongside local MySQL |
+| **Echarts Chart Generation** | LLM-based chart type detection + Echarts JSON config; frontend renders `echarts` code blocks |
+| **MCP API Endpoints** | `POST /mcp/connect`, `GET /mcp/servers`, `POST /mcp/disconnect/{name}` |
+
+### Ontology-Controlled Graph Extraction (v10.0)
+
+| Feature | Description |
+|---------|-------------|
+| **Domain Ontology Schema** | `backend/ontology/schema.py` — 11 entity types, 12 relation predicates, 70+ valid (subject_type, predicate, object_type) rules with wildcard support |
+| **Constrained Extraction Prompt** | Explicitly lists all allowed types and predicates; forbids LLM from inventing new categories |
+| **Pydantic Field Validators** | `EntityInfo.type` and `RelationInfo.predicate` auto-normalized via lookup tables (handles Chinese/English synonyms, LLM hallucinated types) |
+| **Post-Extraction Interceptor** | `_validate_extraction()` filters: invalid entity types, missing subject/object, rule-violating relation directions |
+| **Type-Filtered Entity Resolution** | Cypher `WHERE a.type = b.type` — deduplication only within same entity type, prevents cross-type false merges |
+| **Graph Topology Stats** | `scripts/graph_topology_stats.py` — node/edge/orphan counts, type/predicate distributions, degree percentiles for A/B comparison |
+| **5 Evaluation Modes** | `retrieval`, `pipeline`, `e2e`, `graph` (topology snapshot), `graph_compare` (before/after diff) |
+
+### Incremental Pipeline & DevOps (v11.0)
+
+| Feature | Description |
+|---------|-------------|
+| **Document Fingerprinting** | `backend/documents/fingerprint.py` — SHA-256 file hash computed at upload time; unchanged files skip the entire pipeline |
+| **DocumentIndex Activation** | `document_index` table tracks `file_hash`, `chunk_count`, `version` per document; `upsert_document_index()` handles create/skip/update lifecycle |
+| **Incremental Graph Cleanup** | `cleanup_by_filename()` cascades: strip chunk IDs from edges → remove empty edges → remove orphan entities before re-insertion |
+| **Async Task Queue** | `arq` (Redis-backed) dispatches ingestion to `backend/pipeline/ingestion_worker.py`; upload returns HTTP 202 immediately |
+| **Sync Fallback** | If Redis is unavailable, upload falls back to synchronous processing — no availability impact |
+| **Docker Compose Full Stack** | 10 services: etcd + MinIO + Milvus + Attu + Neo4j + MySQL + Redis + Jaeger + Prometheus + Grafana + API + Worker |
+| **Resource Limits** | API container: 2G memory limit; Worker container: 4G memory limit (heavy LLM extraction) |
 
 ---
 
@@ -355,7 +430,7 @@ Neo4j Full Graph
 </tr>
 <tr>
 <td><strong>Evaluation</strong></td>
-<td>Ragas 0.4 · matplotlib · pytest (v4.0)</td>
+<td>Ragas 0.2.15 · matplotlib · pytest · 3 eval modes · HTML reports (v4.0)</td>
 </tr>
 <tr>
 <td><strong>Observability</strong></td>
@@ -371,7 +446,19 @@ Neo4j Full Graph
 </tr>
 <tr>
 <td><strong>Infrastructure</strong></td>
-<td>Docker Compose (Milvus + etcd + MinIO + Attu + Neo4j + Jaeger + Prometheus + Grafana) · GitHub Actions CI · Dockerfile</td>
+<td>Docker Compose (Milvus + etcd + MinIO + Attu + Neo4j + MySQL + Redis + Jaeger + Prometheus + Grafana + API + Worker) · GitHub Actions CI · Dockerfile</td>
+</tr>
+<tr>
+<td><strong>Async Pipeline</strong></td>
+<td>arq (Redis-backed task queue) · Async ingestion worker · Sync fallback (v11.0)</td>
+</tr>
+<tr>
+<td><strong>MCP Integration</strong></td>
+<td>MCP Python SDK · SSE/stdio transport · Dynamic tool registration · Tool semantic retriever (v9.0)</td>
+</tr>
+<tr>
+<td><strong>Visualization</strong></td>
+<td>Echarts · Chart type auto-detection · Markdown echarts code block rendering (v9.0)</td>
 </tr>
 </table>
 
@@ -387,17 +474,34 @@ Ragent-AI/
 │   │   └── routes.py           # REST API routes (chat, sessions, documents, HITL)
 │   ├── agent/
 │   │   ├── brain.py            # Conversation storage, SSE streaming, HITL resume
-│   │   ├── orchestrator.py     # LangGraph Supervisor-Workers graph (6 agents + synthesize)
+│   │   ├── orchestrator.py     # LangGraph graph: 6 agents + synthesize + planner + critique + replan (v8)
 │   │   ├── tools.py            # Agent tools (weather, knowledge base, web search, graph steps)
-│   │   ├── web_searcher.py     # Tavily web search integration
-│   │   └── data_analyst.py     # Text-to-SQL worker (schema discovery → SQL gen → execution)
+│   │   ├── model_router.py     # Dynamic LLM routing: turbo/plus/max by task
+│   │   ├── web_searcher.py     # Tavily web search integration + RAG fallback
+│   │   ├── data_analyst.py     # Text-to-SQL + MCP multi-data-source query
+│   │   ├── multimodal_specialist.py  # Visual retrieval: image/table description + Milvus search
+│   │   ├── mcp_client.py       # MCP connection manager (SSE/stdio transport)
+│   │   ├── chart_generator.py  # Echarts chart generation (type detection + config)
+│   │   └── tool_retriever.py   # MCP tool semantic retriever (Milvus top-k recall)
 │   ├── rag/
 │   │   ├── pipeline.py         # LangGraph RAG workflow (retrieve → grade → rewrite → expanded)
-│   │   ├── utils.py            # Hybrid retrieval, reranking, auto-merging, query expansion, 3-ch RRF
-│   │   └── graph_retriever.py  # Graph-enhanced retrieval (local search + global search)
+│   │   ├── utils.py            # Hybrid retrieval, reranking, auto-merging, query expansion, 4-ch RRF
+│   │   ├── graph_retriever.py  # Graph-enhanced retrieval (local search + global search)
+│   │   └── visual_retriever.py # Visual retrieval: text-to-image-description semantic search
 │   ├── documents/
 │   │   ├── loader.py           # Three-level hierarchical document chunking (PDF/Word/Excel/MD)
-│   │   └── graph_extractor.py  # LLM entity/relation extraction from L2 chunks
+│   │   ├── graph_extractor.py  # LLM entity/relation extraction from L2 chunks (ontology-controlled v10)
+│   │   └── fingerprint.py      # SHA-256 file/chunk content fingerprinting (v11.0)
+│   ├── ontology/               # Domain ontology constraint layer (v10.0)
+│   ├── pipeline/               # Async ingestion pipeline (v11.0)
+│   │   ├── __init__.py
+│   │   ├── task_queue.py       # arq Redis task queue configuration
+│   │   └── ingestion_worker.py # Async document ingestion worker
+│   │   ├── __init__.py
+│   │   └── schema.py           # Entity types, relation predicates, triple rules, validation functions
+│   │   ├── layout_analyzer.py  # PDF layout analysis (text/image/table separation)
+│   │   ├── media_extractor.py  # Image/table extraction + MinIO upload
+│   │   └── vlm_descriptor.py   # Qwen-VL chart/table description generation
 │   ├── embedding/
 │   │   └── service.py          # Dense (Qwen API) + Sparse (BM25) embedding service
 │   ├── milvus/
@@ -419,8 +523,8 @@ Ragent-AI/
 │   │   └── entity_resolution.py # Two-stage entity dedup (edit-distance + LLM + merge) (v4.0)
 │   ├── evaluation/             # Automated RAG evaluation (v4.0)
 │   │   ├── __init__.py
-│   │   ├── dataset.py          # Golden dataset loader
-│   │   └── metrics.py          # Ragas metrics (faithfulness, relevancy, precision)
+│   │   ├── dataset.py          # Golden dataset loader (80 QA pairs, expected_agent)
+│   │   └── metrics.py          # Ragas metrics + generate_answer + routing accuracy
 │   ├── observability/          # OpenTelemetry + Prometheus + structlog (v5.0)
 │   │   ├── __init__.py
 │   │   ├── tracing.py          # OTel init + manual span utilities
@@ -436,23 +540,31 @@ Ragent-AI/
 │   │   ├── semantic_cache.py   # Milvus ANN + cosine + MySQL store
 │   │   ├── singleflight.py     # Redis Singleflight anti-stampede
 │   │   └── invalidation.py     # Document delete → cache eviction
-│   └── schemas.py              # Pydantic request/response models + GraphEntity/GraphRelation
+│   └── schemas.py              # Pydantic: Chat*, Document*, HITL*, GraphEntity, QueryPlan, CritiqueResult
 │
 ├── scripts/
 │   ├── run_community_clustering.py  # Offline: build graph → cluster → summarize → index
 │   ├── run_entity_resolution.py    # Offline: entity dedup pipeline (v4.0)
-│   ├── run_evaluation.py           # Automated RAG eval + charts (v4.0)
-│   ├── grid_search_rrf.py          # RRF weight optimization (v4.0)
+│   ├── run_evaluation.py           # RAG eval: 5 modes + latency + A/B compare (v4.0/v10.0)
+│   ├── graph_topology_stats.py     # Graph topology metrics for A/B comparison (v10.0)
+│   ├── grid_search_rrf.py          # RRF weight optimization (composite score, graph channel)
+│   ├── generate_report.py          # HTML evaluation report generator
+│   ├── ci_evaluation.sh            # CI threshold check script
 │   └── run_benchmark.py            # Concurrent cache benchmark (v6.0)
 │
 ├── frontend/
 │   ├── index.html              # Vue 3 SPA (chat, trace canvas, HITL modal, settings)
 │   ├── script.js               # Application logic, SSE handler, API integration
-│   └── style.css               # Gemini-inspired dual-theme (Light/Dark)
+│   ├── style.css               # Gemini-inspired dual-theme (Light/Dark)
+│   └── logo.svg                # Application logo
 │
 ├── tests/
 │   ├── test_doc_lifecycle.py   # Soft-delete unit tests (v4.0)
-│   └── golden_dataset.json     # 50-item evaluation dataset (v4.0)
+│   ├── test_evaluation.py      # Evaluation pipeline unit tests
+│   ├── test_v10_ontology.py    # v10 ontology schema + extraction validation tests (53 tests)
+│   ├── test_fingerprint.py     # Document fingerprint SHA-256 unit tests
+│   └── test_incremental_upload.py  # Incremental upload integration tests
+│   └── golden_dataset.json     # 80-item evaluation dataset (v4.0)
 │
 ├── data/
 │   └── documents/              # Uploaded document storage
@@ -462,7 +574,14 @@ Ragent-AI/
 │   │   ├── 5.23todov2.md        # v2.0 — Multi-Agent + HITL specification
 │   │   ├── 5.24todov3.md        # v3.0 — GraphRAG requirements specification
 │   │   ├── 5.25todolistv4.md    # v4.0 — UI optimization & planning
+│   │   ├── 5.25todov5.md        # v5.0 — Observability & HA specification
+│   │   ├── 5.25todov6.md        # v6.0 — Cost optimization specification
+│   │   ├── 5.25todov7.md        # v7.0 — Multimodal upgrade specification
+│   │   ├── 5.30todov8.md        # v8.0 — Adaptive reasoning & self-correction loop
+│   │   ├── 5.30todov9.md        # v9.0 — MCP integration & data federation
+│   │   └── 5.31tdov10.md        # v10.0 — Ontology-controlled graph extraction
 │   │   └── GraphRAG-v3.0-升级计划.md  # v3.0 — Implementation plan (5 phases)
+│   ├── superpowers/plans/       # Detailed implementation plans
 │   └── img.png                  # Application screenshot
 │
 ├── docker-compose.yml          # Full stack (Milvus + Neo4j + Jaeger + Prometheus + Grafana)
@@ -472,6 +591,7 @@ Ragent-AI/
 ├── .github/workflows/ci.yml    # GitHub Actions CI pipeline (v4.0)
 ├── pyproject.toml              # Python dependencies & project metadata
 ├── start.py                    # UTF-8 startup script (uvicorn wrapper)
+├── start_worker.py             # arq async ingestion worker entrypoint (v11.0)
 ├── .env.example                # Environment configuration template
 └── .env                        # Local environment configuration (gitignored)
 ```
@@ -757,13 +877,18 @@ This will:
 - [x] Two-stage entity resolution (edit-distance + LLM confirmation + Cypher merge)
 - [x] Temporal knowledge graph (valid_from / valid_to on entities and relations)
 - [x] Temporal sensitivity routing in Supervisor
-- [x] Golden evaluation dataset (50 QA pairs across 2 query types)
-- [x] Ragas automated evaluation pipeline (faithfulness, answer relevancy, context precision)
-- [x] RRF three-channel weight grid search (0.1 step, auto-optimize)
+- [x] Golden evaluation dataset (80 QA pairs across 7 query types with expected_agent)
+- [x] Ragas automated evaluation pipeline (4 metrics: precision, recall, faithfulness, relevancy; ragas 0.2.15, DashScope API partial compatibility)
+- [x] 3 evaluation modes: retrieval, pipeline, e2e (with LLM answer generation)
+- [x] Routing accuracy evaluation (Supervisor vs expected_agent)
+- [x] RRF weight grid search with composite score optimization + graph channel
+- [x] A/B comparison report with metric diffs
+- [x] HTML evaluation report (radar chart + bar chart + routing matrix + latency)
+- [x] CI threshold check script (ci_evaluation.sh)
+- [x] Evaluation unit tests (test_evaluation.py)
 - [x] RRF weights configurable via environment variables
 - [x] GitHub Actions CI/CD pipeline
 - [x] Dockerfile for application containerization
-- [x] Evaluation visualization (radar chart + per-type bar chart)
 - [x] Entity resolution CLI script (`scripts/run_entity_resolution.py`)
 
 ### v5.0 — Observability & High Availability ✓
@@ -795,6 +920,54 @@ This will:
 - [x] Neo4j ImageNode/TableNode constraints
 - [x] Multimodal Specialist Agent (keyword-triggered visual retrieval)
 - [x] Supervisor routing updated with multimodal route
+
+### v8.0 — Adaptive Reasoning & Self-Correction Loop ✓
+
+- [x] GraphState extension: `query_plan`, `critique_result`, `retry_count`, `draft_answer`
+- [x] Planner node: complex query decomposition into multi-step execution plans
+- [x] Critique node: LLM-driven cross-verification of draft answers against retrieved contexts
+- [x] Replan node: inject missing information as supplement queries for re-retrieval
+- [x] Self-correction loop: Critique → replan → supervisor (max 2 retries)
+- [x] New SSE events: `plan_generated`, `critique_feedback`, `self_correction`
+- [x] Frontend Trace Canvas: planner/critique agent nodes with distinct styling
+- [x] Fix: multimodal_specialist missing edge to synthesize
+- [x] direct_answer bypasses Critique (闲聊无检索上下文，跳过事实核查避免无效重试)
+
+### v9.0 — MCP Integration & Data Federation ✓
+
+- [x] MCP connection manager: SSE/stdio transport, tools/list, tools/call
+- [x] Dynamic tool registration: MCP tools → LangChain StructuredTool auto-conversion
+- [x] Data Analyst multi-source: local MySQL + MCP external databases (PostgreSQL, Salesforce, etc.)
+- [x] Tool semantic retriever: Milvus-based top-k tool recall (prevents context window explosion)
+- [x] Echarts chart generation: LLM-based chart type detection + config generation
+- [x] Frontend Echarts rendering: markdown `echarts` code block → live chart
+- [x] MCP SSE events: `mcp_tool_call`, `mcp_tool_result` in Trace Canvas
+- [x] Planner DAG support: dependencies + input_mapping for multi-step workflows
+- [x] SupervisorState `tool_outputs` for cross-step data passing
+
+### v10.0 — Ontology-Controlled Graph Extraction ✓
+
+- [x] Domain ontology schema: 11 entity types, 12 relation predicates, 70+ triple rules
+- [x] Pydantic field validators: auto-normalize LLM hallucinated types/predicates
+- [x] Constrained extraction prompt: explicit type/predicate whitelist
+- [x] Post-extraction interceptor: `_validate_extraction()` filters violations
+- [x] Manual JSON parsing: DashScope `source`/`target` → `subject`/`object` field mapping
+- [x] Type-filtered entity resolution: `a.type = b.type` Cypher constraint
+- [x] Graph topology stats script: node/edge/orphan/type/predicate/degree metrics
+- [x] Extended evaluation: `graph` and `graph_compare` modes in `run_evaluation.py`
+- [x] Topology charts in HTML report: type distribution, before/after comparison
+- [x] 53 unit tests + full integration test (extraction → ingestion → topology stats)
+
+### v11.0 — Incremental Pipeline & DevOps ✓
+
+- [x] Document fingerprinting: SHA-256 file hash, skip unchanged uploads
+- [x] DocumentIndex activation: file_hash, chunk_count, version tracking
+- [x] Incremental graph cleanup: `cleanup_by_filename()` cascade (strip → prune → orphans)
+- [x] Fix Milvus `is_deleted` phantom field: set `False` on insert
+- [x] Async task queue: `arq` (Redis-backed) + `ingestion_worker.py`
+- [x] Sync fallback: graceful degradation if Redis unavailable
+- [x] Docker Compose full stack: MySQL, Redis, API, Worker services with resource limits
+- [x] 65 unit tests (v10 + v11 fingerprint + incremental upload)
 
 ### v7.x — Planned
 

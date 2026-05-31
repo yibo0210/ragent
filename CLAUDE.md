@@ -77,16 +77,17 @@ Milvus 2.5 · Neo4j 5.26 · MySQL 8.0 · Redis 7.0
 Qwen (DashScope OpenAI-compatible) · text-embedding-v1 (1536-dim) · BM25
 qwen3-rerank (DashScope native API, model name starts with "qwen" auto-switches endpoint)
 NetworkX · python-louvain
+MCP (Model Context Protocol) · Echarts · aiohttp
 
 ### Architecture
 
-**Supervisor-Workers** (LangGraph): supervisor routes to 6 agents — `rag_specialist`, `local_graph_search`, `global_graph_search`, `web_searcher`, `data_analyst`, `direct_answer`. Multi-worker via `Send` fan-out, merged by `synthesize`.
+**Supervisor-Workers** (LangGraph): supervisor routes to 6 agents — `rag_specialist`, `local_graph_search`, `global_graph_search`, `web_searcher`, `data_analyst`, `direct_answer`. Multi-worker via `Send` fan-out, merged by `synthesize`. v8: `planner` (前置推理拆解复杂查询) → workers → `synthesize` → `critique` (事实核查) → END/replan (自纠错循环, max 2 retries). `direct_answer` 和 `data_analyst` 直接到 END，跳过 Critique（闲聊无检索上下文、SQL 查询结果是结构化数据，均非 RAG 检索上下文）。v9: `data_analyst` 支持 MCP 外部数据源，自动发现并调用 MCP 工具。
 
 **RAG Pipeline** (separate LangGraph): `retrieve → grade → [rewrite → retrieve_expanded → grade_v2]`. L1(1200)/L2(600)/L3(300) chunking. Leaf-only Milvus indexing. Auto-merge L3→L2→L1.
 
 **GraphRAG**: Upload → L2 chunks → LLM extraction → Neo4j MERGE (entity + relation + source_chunks). Offline: `scripts/run_community_clustering.py` → Leiden → summaries → Milvus + MySQL.
 
-**SSE Streaming**: `routing`, `agent_start/done`, `rag_step`, `graph_expand`, `community_match`, `content`, `trace`, `agent_trace`, `hitl_interrupt`, `error`.
+**SSE Streaming**: `routing`, `agent_start/done`, `rag_step`, `graph_expand`, `community_match`, `content`, `trace`, `agent_trace`, `hitl_interrupt`, `error`. v8 新增: `plan_generated`, `critique_feedback`, `self_correction`. v9 新增: `mcp_tool_call`, `mcp_tool_result`.
 
 **HITL**: LangGraph `interrupt()` (scenario A: low confidence RAG, scenario B: non-SELECT SQL). Redis lock → HTTP 423 during pending. Resume via `Command(resume=...)`.
 
@@ -95,43 +96,74 @@ NetworkX · python-louvain
 
 | File | Purpose |
 |------|---------|
-| `backend/agent/orchestrator.py` | Supervisor graph: 6 agents + synthesize + temporal routing |
+| `backend/agent/orchestrator.py` | Supervisor graph: 6 agents + synthesize + planner + critique + replan + temporal routing |
 | `backend/agent/brain.py` | SSE streaming, conversation storage, HITL resume |
-| `backend/agent/tools.py` | emit_rag_step, emit_graph_step, token queue, weather/search |
-| `backend/rag/pipeline.py` | RAG LangGraph (retrieve→grade→rewrite) |
-| `backend/rag/utils.py` | Hybrid retrieval, rerank, auto-merge, 3-channel RRF (configurable weights) |
+| `backend/agent/tools.py` | emit_rag_step, emit_graph_step, token queue, MCP tool adapter |
+| `backend/agent/model_router.py` | Dynamic LLM routing: turbo/plus/max by task |
+| `backend/agent/data_analyst.py` | Text-to-SQL + MCP multi-data-source query |
+| `backend/agent/mcp_client.py` | MCP connection manager: SSE/stdio transport, tools/list, tools/call |
+| `backend/agent/chart_generator.py` | Echarts chart generation: type detection + config + markdown format |
+| `backend/agent/tool_retriever.py` | MCP tool semantic retriever: Milvus index + top-k recall |
+| `backend/agent/web_searcher.py` | Tavily API web search + fallback to RAG |
+| `backend/agent/multimodal_specialist.py` | Visual retrieval: image/table description + Milvus search |
+| `backend/rag/pipeline.py` | RAG LangGraph (retrieve→grade→rewrite→retrieve_expanded→grade_v2) |
+| `backend/rag/utils.py` | Hybrid retrieval, rerank, auto-merge, query expansion (Step-Back/HyDE), 4-channel RRF |
 | `backend/rag/graph_retriever.py` | local_graph_search, global_graph_search (+ time_filter) |
+| `backend/rag/visual_retriever.py` | Visual retrieval: text-to-image-description semantic search |
 | `backend/documents/loader.py` | Hierarchical chunking (PDF/Word/Excel/MD/Image) |
-| `backend/documents/graph_extractor.py` | LLM entity/relation extraction (+ valid_from/valid_to) |
+| `backend/documents/graph_extractor.py` | LLM entity/relation extraction (+ valid_from/valid_to, ontology-controlled v10) |
+| `backend/documents/fingerprint.py` | SHA-256 file/chunk content fingerprinting for incremental updates |
+| `backend/ontology/schema.py` | Domain ontology: 11 entity types, 12 predicates, 70+ relation rules, validation |
+| `backend/pipeline/task_queue.py` | arq Redis task queue configuration (async ingestion) |
+| `backend/pipeline/ingestion_worker.py` | Async document ingestion worker (full pipeline outside HTTP) |
+| `backend/documents/layout_analyzer.py` | PDF layout analysis (text/image/table separation) |
+| `backend/documents/media_extractor.py` | Image/table extraction + MinIO upload |
+| `backend/documents/vlm_descriptor.py` | Qwen-VL chart/table description generation |
 | `backend/storage/graph_client.py` | Neo4j driver (run_cypher/write_cypher) |
 | `backend/storage/graph_ingestion.py` | MERGE entities + relations (+ temporal fields) |
 | `backend/storage/graph_cleanup.py` | Neo4j cascade cleanup: strip edges, remove orphans |
-| `backend/storage/doc_lifecycle.py` | Document lifecycle: soft-delete, chunk ID query |
+| `backend/storage/doc_lifecycle.py` | Document lifecycle: soft-delete, chunk ID query, DocumentIndex upsert (hash/version) |
+| `backend/storage/graph_schema.py` | Neo4j constraints and indexes |
+| `backend/storage/models.py` | ORM: sessions, messages, chunks, CommunitySummary, DocumentIndex, QueryCacheStore, checkpoints |
+| `backend/storage/database.py` | SQLAlchemy engine + session factory |
+| `backend/storage/checkpointer.py` | LangGraph MySQL checkpointer for state persistence |
+| `backend/storage/cache.py` | Redis wrapper: get/set/lock/json |
+| `backend/storage/parent_chunk_store.py` | MySQL parent chunk (L1/L2) store for auto-merge |
 | `backend/graph/community.py` | Leiden clustering, summaries, Milvus indexing |
 | `backend/graph/entity_resolution.py` | Two-stage entity dedup: edit-distance + LLM + Cypher merge |
-| `backend/evaluation/dataset.py` | Golden dataset loader (50 QA pairs) |
-| `backend/evaluation/metrics.py` | Ragas metrics: faithfulness, relevancy, precision |
 | `backend/milvus/client.py` | Milvus hybrid search + delete_by_chunk_ids + is_deleted filter |
+| `backend/milvus/writer.py` | Batch write documents to Milvus with progress callback |
 | `backend/embedding/service.py` | Dense (Qwen API) + Sparse (BM25) |
-| `backend/storage/models.py` | ORM: sessions, messages, chunks, CommunitySummary, DocumentIndex, checkpoints (+ soft-delete fields) |
-| `backend/schemas.py` | Pydantic: Chat*, Document*, HITL*, GraphEntity, GraphRelation, DocumentStatus |
-| `scripts/run_community_clustering.py` | Offline: graph→cluster→summarize→index |
-| `scripts/run_entity_resolution.py` | Offline: entity dedup pipeline |
-| `scripts/run_evaluation.py` | Automated RAG eval + matplotlib charts |
-| `scripts/grid_search_rrf.py` | RRF weight grid search optimization |
+| `backend/evaluation/dataset.py` | Golden dataset loader (80 QA pairs, 7 query types, expected_agent) |
+| `backend/evaluation/metrics.py` | Ragas metrics + generate_answer + routing accuracy + critique_pass_rate |
+| `backend/schemas.py` | Pydantic: Chat*, Document*, HITL*, GraphEntity, GraphRelation, QueryPlan, CritiqueResult |
+| `backend/cache/semantic_cache.py` | Milvus ANN + cosine + MySQL semantic cache |
+| `backend/cache/singleflight.py` | Redis singleflight anti-stampede |
+| `backend/cache/invalidation.py` | Doc delete → cache eviction |
 | `backend/observability/tracing.py` | OTel init + ConsoleSpanExporter + get_tracer |
 | `backend/observability/metrics.py` | Prometheus metrics: tokens, routing, latency, circuit breaker |
 | `backend/observability/logging.py` | structlog JSON logging configuration |
 | `backend/ha/circuit_breaker.py` | Circuit breaker state machine + LLM/Tavily protection |
 | `backend/ha/retry.py` | tenacity exponential backoff retry decorator |
 | `backend/ha/degradation.py` | Neo4j timeout → Dense+Sparse fallback |
-| `prometheus.yml` | Prometheus scrape config (targets app :8000) |
-| `backend/cache/semantic_cache.py` | Milvus ANN + cosine + MySQL semantic cache |
-| `backend/cache/singleflight.py` | Redis singleflight anti-stampede |
-| `backend/cache/invalidation.py` | Doc delete → cache eviction |
-| `backend/agent/model_router.py` | Dynamic LLM routing: turbo/plus/max by task |
+| `scripts/run_community_clustering.py` | Offline: graph→cluster→summarize→index |
+| `scripts/run_entity_resolution.py` | Offline: entity dedup pipeline |
+| `scripts/run_evaluation.py` | RAG eval: 5 modes (retrieval/pipeline/e2e/graph/graph_compare) + latency + A/B compare |
+| `scripts/graph_topology_stats.py` | Graph topology metrics: nodes, edges, orphans, type/predicate distribution |
+| `scripts/grid_search_rrf.py` | RRF weight grid search (composite score, graph channel, all RAGAS metrics) |
+| `scripts/generate_report.py` | HTML evaluation report: radar chart + bar chart + routing matrix + latency |
+| `scripts/ci_evaluation.sh` | CI threshold check: context_precision ≥ 0.6, faithfulness ≥ 0.7, answer_relevancy ≥ 0.6 |
 | `scripts/run_benchmark.py` | Concurrent cache benchmark |
-| `frontend/script.js` | Vue 3: SSE handler, trace panel, HITL modal |
+| `prometheus.yml` | Prometheus scrape config (targets app :8000) |
+| `tests/test_doc_lifecycle.py` | Document soft-delete unit tests |
+| `tests/test_evaluation.py` | Evaluation unit tests (golden dataset, RRF fusion, metrics signatures) |
+| `tests/test_fingerprint.py` | Document fingerprint SHA-256 unit tests |
+| `tests/test_incremental_upload.py` | Incremental upload integration tests (DocumentIndex, hash skip, cleanup) |
+| `tests/test_v10_ontology.py` | v10 ontology schema + extraction validation tests |
+| `start_worker.py` | arq async ingestion worker entrypoint |
+| `frontend/index.html` | Vue 3 SPA: chat, trace canvas, HITL modal, settings |
+| `frontend/script.js` | Vue 3 app logic: SSE handler, trace panel, HITL modal, session management |
+| `frontend/style.css` | Gemini-inspired dual-theme (Light/Dark) styles |
 
 ### Patterns
 
@@ -147,7 +179,22 @@ NetworkX · python-louvain
 - **Temporal routing**: Supervisor detects time-sensitive queries (`is_temporal`/`temporal_year`) → `local_graph_search_node` passes `time_filter` → Cypher filters by `valid_from`/`valid_to`
 - **Entity resolution**: `find_candidates_in_community` (edit-distance) → `resolve_entities_batch` (LLM confirm) → `merge_entity_pair` (Cypher DETACH DELETE + edge inheritance)
 - **DocumentIndex**: tracks filename-level version/state; `mark_document_deleted` bumps version and sets `is_deleted` on both ParentChunk and DocumentIndex
-- **RRF weights**: configurable via `RRF_WEIGHT_DENSE/SPARSE/GRAPH` env vars, grid-searchable via `scripts/grid_search_rrf.py`
+- **RRF weights**: configurable via `RRF_WEIGHT_DENSE/SPARSE/GRAPH/VISUAL` env vars; `rrf_fusion_three_channel` supports 3 or 4 weights, grid-searchable via composite score
+- **Evaluation 3 modes**: `retrieval` (initial retrieval only), `pipeline` (full RAG pipeline), `e2e` (LLM generates answer + routing accuracy + latency)
+- **Golden dataset**: 80 QA pairs with `expected_agent` field for routing accuracy eval; 7 query types: conceptual, detail, cross_doc, global_summary, realtime, chat, data_query
+- **RAGAS 4 metrics**: context_precision, context_recall, faithfulness, answer_relevancy; composite = 0.4*prec + 0.3*faith + 0.3*rel. Uses ragas 0.2.15 (0.4.x incompatible with DashScope API format). `context_precision` and `faithfulness` work reliably; `answer_relevancy` and `context_recall` may return NaN due to DashScope prompt format rejection (400 error)
+- **Routing accuracy**: `evaluate_routing_accuracy()` calls Supervisor LLM directly (no Worker execution) and compares against `expected_agent`
+- **EvaluationResult handling**: ragas 0.2.x returns dict directly; code also handles 0.4.x `EvaluationResult` objects via `_scores_dict`/`to_pandas` fallback chain
+- **Chart NaN safety**: `generate_charts` and `generate_report` convert NaN to 0 before matplotlib rendering to prevent polar plot crashes
+- **v8 Planner**: `planner_node` sits between supervisor and workers; complex queries get decomposed into multi-step plans (`QueryPlan` JSON); simple queries bypass planner entirely
+- **v8 Critique**: `critique_node` sits after synthesize; validates draft answer against retrieved contexts via LLM cross-verification; outputs `CritiqueResult` with `is_valid`/`missing_information`/`feedback`. `direct_answer` bypasses Critique (goes directly to END) —闲聊没有检索上下文，Critique 必然判"依据不足"导致无效重试
+- **v8 Self-correction loop**: `route_after_critique` → if invalid and retry<2 → `replan_node` (injects missing_info as supplement query) → supervisor re-routes; max 2 retries prevents infinite loops
+- **v8 draft_answer**: `synthesize_node` always saves `draft_answer` to state (single worker: extract from worker_outputs; multi worker: LLM synthesis result)
+- **v9 MCP client**: `MCPConnectionManager` manages connections to multiple MCP Servers (SSE/stdio); `get_mcp_manager()` global singleton; `connect()` → `get_available_tools()` → `call_tool()` lifecycle
+- **v9 Dynamic tool registration**: `mcp_tools_to_langchain_tools()` converts MCP `tools/list` Schema to LangChain `StructuredTool`; `get_dynamic_tools()` returns tools for a specific agent
+- **v9 Tool retriever**: `ToolRetriever` indexes MCP tool descriptions into Milvus; `retrieve_tools(query, top_k)` semantic search prevents context window explosion when 100+ tools exist
+- **v9 Echarts**: `chart_generator.py` detects chart type via LLM, generates Echarts JSON config; frontend `configureMarked()` intercepts ````echarts` code blocks and renders via `echarts.init()`
+- **v9 Data Analyst multi-source**: `get_mcp_data_sources()` discovers database-type MCP tools; `generate_mcp_query()` LLM generates query params from tool schema; `execute_mcp_query()` calls MCP tool
 - **OTel manual spans**: `get_tracer("ragent.xxx")` + `tracer.start_as_current_span()` on Agent nodes, Milvus queries, Neo4j Cypher — no FastAPI auto-instrument
 - **Prometheus /metrics**: `init_metrics(app)` registers `/metrics` endpoint; `Metrics.record_*()` methods called from spans
 - **structlog**: `init_logging()` in `create_app()` configures JSON logging globally; use `get_logger("name")` for structured logging
@@ -158,6 +205,12 @@ NetworkX · python-louvain
 - **Model routing**: `get_model_for_agent(agent_name)` returns ChatOpenAI with model from `ROUTE_MAP`; Supervisor/DirectAnswer use qwen-turbo, heavy tasks use qwen-plus/max
 - **Singleflight**: `with_singleflight(key_prefix)` decorator wraps `write_cache` to prevent cache stampede under high concurrency
 - **Supervisor manual JSON parsing**: Qwen `with_structured_output` incompatible with LangChain (json_mode needs "json" in prompt, function_calling conflicts with thinking mode). Fix: use `model.invoke()` + regex JSON extraction from response text.
+- **v10 Ontology-controlled extraction**: `backend/ontology/schema.py` defines ENTITY_TYPES (11), RELATION_PREDICATES (12), RELATION_RULES (70+ triples with `*` wildcard). `graph_extractor.py` uses field_validator + `_normalize_entity_type()`/`_normalize_predicate()` + `_validate_extraction()` interceptor. DashScope `with_structured_output` returns `source`/`target` instead of `subject`/`object` — manual JSON parsing with field name mapping handles this.
+- **v10 Entity resolution type filter**: `entity_resolution.py` Cypher adds `AND a.type = b.type` — only same-type entities compared for dedup, reduces false merges.
+- **v10 Graph topology stats**: `scripts/graph_topology_stats.py` queries Neo4j for node/edge/orphan counts, type/predicate distributions, degree percentiles. Used for A/B comparison of extraction quality. Neo4j 5.26 requires `COUNT {}` instead of `size()` for pattern expressions.
+- **v11 Incremental pipeline**: `fingerprint.py` computes SHA-256 per file. `doc_lifecycle.upsert_document_index()` tracks hash/version in `DocumentIndex` table. Upload endpoint checks hash → skip if unchanged. Changed files trigger: Milvus delete by filename → parent_chunk_store delete → `graph_cleanup.cleanup_by_filename()` → re-extract → re-insert.
+- **v11 Async task queue**: `arq` (Redis-based) dispatches `run_ingestion_task` to `backend/pipeline/ingestion_worker.py`. Upload returns HTTP 202 immediately. Worker initializes its own DB/services. Fallback to sync if Redis unavailable.
+- **v11 Milvus is_deleted fix**: `writer.py` now sets `is_deleted: False` on insert. Previously the field existed in schema and was filtered on retrieval but never set — worked by accident.
 - **Checkpointer pending_writes**: `_load_writes` must return `(task_id, channel, value)` triples for LangGraph 0.2+ compatibility. Old format `(channel, value)` causes "not enough values to unpack (expected 3, got 2)".
 - **Milvus pymilvus 2.5 API**: `client.search()` uses `search_params` not `param`. Silent 0-result failure with old param name.
 - **Milvus gRPC reconnect**: `_ensure_connected()` calls `get_load_state()` before each query; resets client on failure to prevent "closed channel" errors.

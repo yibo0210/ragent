@@ -80,19 +80,33 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
 
 
 def _build_prototype_embeddings(embedding_service) -> dict[str, list[list[float]]]:
-    """为各级别原型查询生成 Embedding 并缓存。"""
+    """为各级别原型查询生成 Embedding 并缓存（单次 API 调用）。"""
     try:
-        l1_embs = embedding_service.get_embeddings(_L1_PROTOTYPES)
-        l2_embs = embedding_service.get_embeddings(_L2_PROTOTYPES)
-        l3_embs = embedding_service.get_embeddings(_L3_PROTOTYPES)
+        all_queries = _L1_PROTOTYPES + _L2_PROTOTYPES + _L3_PROTOTYPES
+        all_embs = embedding_service.get_embeddings(all_queries)
+        n = len(_L1_PROTOTYPES)
         return {
-            "L1_FACTUAL": l1_embs,
-            "L2_REASONING": l2_embs,
-            "L3_MACRO_SUMMARY": l3_embs,
+            "L1_FACTUAL": all_embs[:n],
+            "L2_REASONING": all_embs[n:2*n],
+            "L3_MACRO_SUMMARY": all_embs[2*n:3*n],
         }
     except Exception as e:
         logger.warning("原型 Embedding 生成失败，降级为纯关键词模式", error=str(e))
         return None
+
+
+def warmup():
+    """预热原型 Embedding 缓存（应在应用启动时调用）。"""
+    global _prototype_embeddings
+    if _prototype_embeddings is not None:
+        return
+    try:
+        from backend.embedding.service import EmbeddingService
+        service = EmbeddingService()
+        _prototype_embeddings = _build_prototype_embeddings(service)
+        logger.info("query_profiler_warmup_complete")
+    except Exception as e:
+        logger.warning("query_profiler_warmup_failed", error=str(e))
 
 
 @dataclass

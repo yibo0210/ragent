@@ -261,6 +261,28 @@ def supervisor_node(state: SupervisorState) -> dict:
     except Exception:
         query_intent = None
 
+    # v12: L1 简单查询快速通道 — 跳过 Supervisor LLM，直接路由到 direct_answer
+    if query_intent and query_intent["level"] == "L1_FACTUAL" and query_intent["complexity_score"] < 0.3:
+        agent_trace = state.get("agent_trace") or {}
+        agent_trace["routing_agent"] = "direct_answer"
+        agent_trace["routing_agents"] = ["direct_answer"]
+        agent_trace["routing_reason"] = f"Query Profiler 快速通道: L1 事实类 (score={query_intent['complexity_score']})"
+        agent_trace["routing_is_temporal"] = False
+        agent_trace["routing_temporal_year"] = ""
+        agent_trace["query_intent"] = query_intent
+        log.info("fast_route_l1", query=user_query[:50])
+        Metrics.record_routing("direct_answer")
+        return {
+            "next_worker": "direct_answer",
+            "next_workers": ["direct_answer"],
+            "route_reason": agent_trace["routing_reason"],
+            "user_query": user_query,
+            "agent_trace": agent_trace,
+            "worker_outputs": {},
+            "human_interfered_input": "",
+            "query_intent": query_intent,
+        }
+
     # 调用 Supervisor LLM 进行路由决策（手动 JSON 解析）
     model = _get_supervisor_model()
     route_prompt = SUPERVISOR_SYSTEM_PROMPT + (
@@ -583,7 +605,8 @@ def data_analyst_node(state: SupervisorState) -> dict:
 
 def direct_answer_node(state: SupervisorState) -> dict:
     """Direct Answer 节点：直接生成回答（闲聊、通用知识）。"""
-    model = _get_worker_model()
+    from backend.agent.model_router import get_model_for_agent
+    model = get_model_for_agent("direct_answer")  # qwen-turbo，更快
 
     # 构建对话历史（保留最近 10 条）
     recent_messages = state["messages"][-10:]

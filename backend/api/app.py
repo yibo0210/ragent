@@ -24,6 +24,12 @@ def create_app() -> FastAPI:
     @app.on_event("startup")
     async def _startup_init_db():
         init_db()
+        # v12: 预热 Query Profiler 原型 Embedding（避免首次请求阻塞）
+        try:
+            from backend.agent.query_profiler import warmup
+            warmup()
+        except Exception:
+            pass
 
     app.add_middleware(
         CORSMiddleware,

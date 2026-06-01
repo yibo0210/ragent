@@ -1328,6 +1328,500 @@ RAG = Retrieval Augmented Generation，检索增强生成。核心思想是**让
 
 ---
 
+## 17. 代码级深度追问（高频追问准备）
+
+### Q16: Supervisor 的 JSON 解析是怎么做的？为什么不用 with_structured_output？
+
+**回答**：
+
+用正则表达式手动解析，不用 LangChain 的 `with_structured_output`：
+
+```python
+# orchestrator.py:275
+json_match = re.search(
+    r'\{[^{}]*"routes"\s*:\s*\[[^\]]*\][^{}]*\}', 
+    content, re.DOTALL
+)
+if json_match:
+    data = json.loads(json_match.group())
+    routes = data.get("routes", ["rag_specialist"])
+```
+
+**为什么不用 with_structured_output？**
+
+Qwen 模型有两种模式：thinking 模式和 json_mode。LangChain 的 `with_structured_output(json_mode=True)` 会在 prompt 中注入 "Please respond with a JSON object"，但这与 Qwen 的 thinking 模式冲突——thinking 模式要求模型先输出推理过程再输出结果，而 json_mode 要求直接输出 JSON。两者叠加会导致模型输出格式混乱。
+
+**降级策略**：正则解析失败时，用关键词匹配兜底：
+```python
+content_lower = content.lower()
+if "web_search" in content_lower or "联网" in content_lower:
+    routes = ["web_searcher"]
+else:
+    routes = ["rag_specialist"]
+```
+
+**追问：正则匹配的局限性是什么？**
+- 无法处理嵌套 JSON（正则只匹配一层括号）
+- 如果 LLM 输出多个 JSON 对象，只匹配第一个
+- 如果 LLM 输出的 JSON 格式有误（如尾逗号），json.loads 会失败
+
+**实际处理**：这些情况在实际中很少发生，因为 Prompt 明确要求"严格输出JSON格式"。即使失败，keyword fallback 保证系统不会崩溃。
+
+### Q17: LangGraph 的 Send 并行 Fan-Out 是怎么工作的？
+
+**回答**：
+
+当 Supervisor 决定路由到多个 Worker 时（如 "rag_specialist + web_searcher"），使用 LangGraph 的 `Send` 实现并行：
+
+```python
+# orchestrator.py route_supervisor
+def route_supervisor(state):
+    workers = state.get("next_workers", [])
+    if len(workers) == 1 and workers[0] == "direct_answer":
+        return "direct_answer"  # 单路由，不需要 synthesize
+    
+    sends = []
+    for worker in workers:
+        sends.append(Send(worker, state))
+    return sends  # 并行 fan-out
+```
+
+**Send 的本质**：`Send(node_name, state)` 告诉 LangGraph "把这个 state 发送给 node_name 节点，独立执行"。多个 Send 会并行执行，每个 Worker 拿到的是 state 的副本。
+
+**Synthesize 聚合**：所有并行 Worker 执行完后，LangGraph 自动将它们的 state 更新合并，然后进入 synthesize 节点：
+
+```python
+def synthesize_node(state):
+    worker_outputs = state.get("worker_outputs", {})
+    if len(worker_outputs) <= 1:
+        # 单 Worker，直接提取答案
+        for agent_name, output in worker_outputs.items():
+            return {"draft_answer": output.get("answer", "")}
+    
+    # 多 Worker，LLM 聚合
+    parts = []
+    for agent_name, output in worker_outputs.items():
+        label = {"rag_specialist": "知识库检索", "web_searcher": "联网搜索", ...}
+        parts.append(f"### {label[agent_name]}\n{output['answer']}")
+    
+    synthesis_prompt = f"你是一个信息整合专家。请将以下回答整合为一个完整回答...\n\n{chr(10).join(parts)}"
+    answer = _stream_answer(model, [HumanMessage(content=synthesis_prompt)])
+    return {"draft_answer": answer}
+```
+
+**追问：并行执行时 state 的合并规则是什么？**
+
+LangGraph 使用 `Annotated[list[BaseMessage], add_messages]` 定义 messages 字段的合并规则——`add_messages` 表示多个 Worker 的输出消息会被追加到列表中。其他字段（如 `worker_outputs`、`rag_trace`）使用"最后写入 wins"的规则。这就是为什么每个 Worker 往 `worker_outputs` 中写入不同的 key（如 `worker_outputs["rag_specialist"]`、`worker_outputs["web_searcher"]`），避免冲突。
+
+### Q18: RRF 融合的具体实现细节？
+
+**回答**：
+
+```python
+# backend/rag/utils.py rrf_fusion_three_channel
+def rrf_fusion_three_channel(dense_results, sparse_results, graph_results,
+                              visual_results=None, k=60, weights=None, top_k=10):
+    w1, w2, w3, w4 = weights  # (0.4, 0.3, 0.15, 0.15)
+    scores = {}
+    
+    for rank, (doc, _) in enumerate(dense_results, 1):  # 1-based rank
+        key = doc.get("chunk_id") or doc.get("text", "")[:50]
+        scores[key] = scores.get(key, 0) + w1 / (k + rank)
+    
+    # 同理处理 sparse、graph、visual 通道
+    
+    ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    return [all_docs[k] for k, _ in ranked[:top_k]]
+```
+
+**核心公式**：`RRF_Score(doc) = Σ (weight_channel / (k + rank_channel))`
+
+- `k=60` 是平滑常数，防止排名第 1 的文档得分过高
+- `rank` 是 1-based 的（排名第 1 的文档 rank=1）
+- 权重之和不需要为 1，但归一化后更直观
+
+**为什么 k=60？** 这是 RRF 论文的推荐值。k 越大，排名靠后的文档得分衰减越慢，融合越"民主"；k 越小，排名靠前的文档优势越大。
+
+**追问：Dense 和 Sparse 检索有什么区别？**
+
+- **Dense**：Qwen text-embedding-v1 生成 1536 维向量，用 HNSW 索引做 ANN 检索。擅长语义相似度（"向量数据库"能匹配到"embedding 存储"）
+- **Sparse**：BM25 算法生成稀疏向量（大部分维度为 0），用 SPARSE_INVERTED_INDEX 索引。擅长精确关键词匹配（"Milvus 端口"精确匹配"19530"）
+- **互补**：纯 Dense 可能把"Milvus 端口"匹配到"数据库连接"（语义相似但不精确）；纯 Sparse 可能把"向量数据库"漏掉"embedding 存储"（关键词不匹配但语义相关）
+
+### Q19: Auto-Merging 是怎么解决碎片化检索的？
+
+**回答**：
+
+```python
+# backend/rag/utils.py _merge_to_parent_level
+def _merge_to_parent_level(docs, threshold=2):
+    groups = defaultdict(list)
+    for doc in docs:
+        parent_id = doc.get("parent_chunk_id", "")
+        if parent_id:
+            groups[parent_id].append(doc)
+    
+    merge_ids = [pid for pid, children in groups.items() if len(children) >= threshold]
+    # 如果同一个 L2 父块下有 >= 2 个 L3 子块被检索到，就合并为 L2 父块
+    
+    parent_docs = _parent_chunk_store.get_documents_by_ids(merge_ids)
+    # 用 L2 父块的文本替换 L3 子块的文本
+```
+
+**两段合并**：先 L3→L2，再 L2→L1：
+```python
+merged_docs, _ = _merge_to_parent_level(docs, threshold=2)  # L3→L2
+merged_docs, _ = _merge_to_parent_level(merged_docs, threshold=2)  # L2→L1
+```
+
+**举例**：假设检索到 3 个 L3 块，其中 2 个属于同一个 L2 父块：
+- 合并前：`[L3_a1(0.9), L3_a2(0.8), L3_b1(0.7)]`
+- 合并后：`[L2_a(0.9), L3_b1(0.7)]`（L2_a 的 score 取子块最大值）
+
+**解决的问题**：如果用户问"AnomalyCLIP 的核心方法是什么？"，答案可能分散在同一个 L2 块下的多个 L3 块中。直接返回 L3 碎片会让 LLM 难以组织完整回答；合并为 L2 父块后，上下文更完整。
+
+### Q20: HITL 中断恢复的完整链路？
+
+**回答**：
+
+**中断触发**（rag_specialist_node）：
+```python
+if rag_result.get("force_interrupt"):
+    interrupt({
+        "type": "hitl_rag_grade",
+        "scenario": "low_confidence_rag",
+        "query": user_query,
+        "grade_score": rag_trace.get("grade_score_v2"),
+        "docs": docs,
+        "message": "知识库检索两次评分均未通过，请审核并提供指导。",
+    })
+```
+
+**LangGraph 内部**：`interrupt()` 将当前图状态（所有 TypedDict 字段）序列化到 MySQL `graph_checkpoints` 表，然后抛出异常中断执行。
+
+**前端处理**（brain.py）：
+```python
+if "__interrupt__" in event:
+    interrupt_data = event["__interrupt__"]
+    interrupt_info = interrupt_data[0] if isinstance(interrupt_data, tuple) else interrupt_data
+    cache.acquire_lock(session_id)  # Redis 分布式锁
+    await output_queue.put({"type": "hitl_interrupt", "data": interrupt_info})
+```
+
+**恢复**（resume_hitl_graph）：
+```python
+from langgraph.types import Command
+resume_value = {"action": action}  # "approve" / "reject" / "modify"
+if action == "modify" and modified_input:
+    resume_value["human_interfered_input"] = modified_input
+
+graph = _get_supervisor_graph()
+async for event in graph.astream(
+    Command(resume=resume_value),
+    stream_mode="updates",
+    config={"configurable": {"thread_id": session_id}},
+):
+    # 处理恢复后的事件...
+```
+
+**关键机制**：
+1. MySQL checkpointer 保存图状态（`put_writes` 存储 pending writes）
+2. Redis lock 阻止同一 session 的新请求（HTTP 423）
+3. `Command(resume=...)` 从 MySQL 恢复状态，继续执行
+4. 恢复后释放 Redis lock
+
+**追问：如果用户在 HITL 等待期间关闭浏览器怎么办？**
+
+Redis lock 有 TTL（默认 600 秒）。超时后 lock 自动释放，session 可以重新发起请求。但图状态仍然保存在 MySQL 中，下次请求会检查是否有 pending 的 checkpoint。
+
+### Q21: 语义缓存的命中逻辑？
+
+**回答**：
+
+```python
+# backend/cache/semantic_cache.py
+def query_cache(query):
+    query_vec = embedding_service.get_embeddings([query])[0]
+    results = milvus.search(
+        collection_name="semantic_cache_collection",
+        data=[query_vec],
+        limit=3,
+        output_fields=["query_hash", "response_text"],
+    )
+    
+    for hit in results[0]:
+        # 手动计算余弦相似度
+        score = np.dot(query_vec, cached_vec) / (np.linalg.norm(query_vec) * np.linalg.norm(cached_vec))
+        if score >= 0.95:  # CACHE_SIMILARITY_THRESHOLD
+            # MySQL 更新命中计数
+            cache_entry = db.query(QueryCacheStore).filter_by(query_hash=hit["entity"]["query_hash"]).first()
+            cache_entry.hit_count += 1
+            return {"response": cache_entry.response_text, "similarity": score}
+    
+    return None  # 未命中
+```
+
+**为什么阈值是 0.95？** 这是经过实验调优的。0.95 意味着两个 query 的语义几乎完全相同（如"什么是 RAG？"和"RAG 是什么？"）。如果降到 0.9，可能会把语义相似但意图不同的 query 误命中（如"什么是 RAG？"和"RAG 的优缺点是什么？"）。
+
+**追问：缓存失效是怎么做的？**
+
+```python
+# backend/cache/invalidation.py
+def invalidate_by_filename(filename):
+    # 1. 查 MySQL 获取该文件相关的 query_hash 列表
+    # 2. 从 Milvus semantic_cache_collection 中删除对应向量
+    # 3. 从 MySQL QueryCacheStore 中删除对应记录
+```
+
+文档删除时触发缓存失效，避免用户问到已删除文档相关的问题时返回旧缓存。
+
+### Q22: 熔断器的状态机是怎么工作的？
+
+**回答**：
+
+```
+CLOSED (正常) ──失败 3 次──→ OPEN (熔断)
+    ↑                            │
+    │                       60 秒超时
+    │                            │
+    │                            ▼
+    └──成功 1 次── HALF_OPEN (试探)
+```
+
+```python
+class CircuitBreaker:
+    def call(self, func, *args, **kwargs):
+        if self.state == State.OPEN:
+            if time.time() - self.last_failure_time >= self.recovery_timeout:
+                self._transition(State.HALF_OPEN)  # 超时后试探
+            else:
+                raise CircuitBreakerOpenError(self.name)  # 仍在熔断期
+        
+        try:
+            result = func(*args, **kwargs)
+            self._on_success()  # HALF_OPEN 下成功 → CLOSED
+            return result
+        except Exception as e:
+            self._on_failure()  # 失败计数 +1
+            raise
+```
+
+**渐进恢复**：`_on_success` 中 `self.failures = max(0, self.failures - 1)`，每次成功减少一个失败计数，而不是直接清零。这防止了"刚恢复就立即承受满负载"的问题。
+
+**两个全局实例**：
+```python
+llm_breaker = CircuitBreaker("llm", failure_threshold=3, recovery_timeout=60.0)
+tavily_breaker = CircuitBreaker("tavily", failure_threshold=3, recovery_timeout=60.0)
+```
+
+### Q23: 为什么 direct_answer 和 data_analyst 跳过 Critique？
+
+**回答**：
+
+**direct_answer 跳过 Critique**：闲聊回答没有检索上下文。Critique 的逻辑是"逐条检查回答中的事实声明是否在上下文中有依据"。闲聊回答（如"你好！有什么可以帮你的？"）本身不包含事实声明，也没有上下文，Critique 必然判"依据不足"，触发无意义的 replan 循环。
+
+**data_analyst 跳过 Critique**：SQL 查询结果是结构化数据（表格），不是 RAG 检索的文本片段。Critique 设计用于验证"从文档中检索到的信息"，不适用于验证"从数据库中查询到的数字"。用 Critique 检查 SQL 结果会导致误判。
+
+**实现**：在 LangGraph 图拓扑中，这两个节点直接连接到 END，不经过 synthesize → critique 链路：
+```python
+graph.add_edge("direct_answer", END)  # 跳过 critique
+graph.add_edge("data_analyst", END)   # 跳过 critique
+```
+
+---
+
+## 18. 实战调试场景（Behavioral Questions）
+
+### Q24: 如果用户反馈"回答不准确"，你怎么排查？
+
+**排查步骤**：
+
+1. **检查 RAG Trace**：查看前端 Trace Canvas 或数据库中的 `rag_trace` 字段
+   - `retrieval_mode` 是什么？（hybrid/dense_fallback/failed）
+   - 检索到了多少个 chunks？chunks 的 text 内容是否相关？
+   - rerank_score 是多少？（低分说明 rerank 认为不相关）
+
+2. **检查路由**：`agent_trace.routing_agent` 是什么？
+   - 如果路由错误（应该走 local_graph_search 但走了 direct_answer），说明 Supervisor 意图识别有问题
+   - 如果路由正确但结果不好，说明检索层有问题
+
+3. **检查 Critique**：`critique_result` 是否触发了自纠错？
+   - 如果 Critique 判定 is_valid=false 但 replan 后仍然不好，说明查询扩展策略不适合这类问题
+
+4. **检查图谱**：如果是图谱检索问题
+   - `graph_triples_count` 是否为 0？（图谱可能没有相关实体）
+   - Neo4j 中是否有相关实体和关系？
+
+**常见原因**：
+- 文档未上传或未处理完成
+- 切片粒度太细，答案被分散到多个 chunks
+- Embedding 模型对领域术语理解不足
+- 图谱抽取遗漏了关键实体或关系
+
+### Q25: 如果系统突然变慢，你怎么定位瓶颈？
+
+**排查步骤**：
+
+1. **检查 Prometheus 指标**：
+   - `llm_call_latency_seconds`：LLM 调用是否变慢？（DashScope API 延迟）
+   - `vector_search_latency_seconds`：Milvus 检索是否变慢？
+   - `graph_query_latency_seconds`：Neo4j 查询是否变慢？
+   - `active_requests`：并发请求数是否飙升？
+
+2. **检查 Jaeger 链路追踪**：
+   - 哪个 Span 耗时最长？
+   - 是否有重试？（tenacity 重试会叠加延迟）
+   - 是否触发了 Critique 循环？（最多 3 轮 LLM 调用）
+
+3. **检查 Redis**：
+   - 语义缓存是否命中？（miss 会导致完整 RAG 流程）
+   - HITL lock 是否残留？（阻塞新请求）
+
+4. **检查 Docker 资源**：
+   - `docker stats`：容器 CPU/内存使用率
+   - Milvus 容器是否 OOM？
+
+**常见瓶颈**：
+- LLM API 延迟波动（DashScope 高峰期）
+- Milvus 在大量数据上检索变慢（需要重建索引）
+- Critique 循环导致 3 轮 LLM 调用（每轮 10-20 秒）
+
+### Q26: 如果要支持 1000 QPS，你会怎么改造？
+
+**回答**：
+
+当前架构的瓶颈在 LLM 调用（每次 10-20 秒）和 Milvus 检索（每次 100ms）。1000 QPS 意味着同时有 10000-20000 个 LLM 请求在飞行中。
+
+**改造方案**：
+
+1. **缓存层**：语义缓存命中率提升到 80%（当前 0.95 阈值太高，降到 0.90）
+2. **负载降级**：v12 的 WARNING/CRITICAL 机制自动减少 LLM 调用
+3. **模型路由**：简单查询用 qwen-turbo（延迟 2-3 秒），复杂查询才用 qwen-plus
+4. **Milvus 分片**：按文档类型分 Collection，减少单次检索范围
+5. **异步化**：所有 LLM 调用改为异步，避免阻塞线程池
+6. **水平扩展**：API 和 Worker 容器多副本，Nginx 负载均衡
+
+---
+
+## 19. 系统设计追问（System Design）
+
+### Q27: 如果让你重新设计这个系统，你会做什么不同的决定？
+
+**回答**：
+
+1. **用 OpenAI 兼容的模型**（如 GPT-4o-mini）替代 Qwen，避免 `with_structured_output` 兼容性问题，减少大量手动 JSON 解析代码
+2. **用 PostgreSQL 替代 MySQL**，支持 JSONB 字段存储 trace 数据，减少表数量
+3. **用 Redis Streams 替代 asyncio.Queue** 做 SSE，支持消息持久化和重放
+4. **引入向量数据库的混合检索原生支持**（如 Milvus 2.5 的 hybrid_search），减少自建 RRF 逻辑
+5. **用 LangSmith 替代自建 Trace**，获得更好的调试体验
+
+### Q28: 你的系统和 LangChain 的 RetrievalQA 有什么区别？
+
+**回答**：
+
+| 维度 | LangChain RetrievalQA | Ragent AI |
+|------|----------------------|-----------|
+| 检索 | 单路向量检索 | 三路 RRF 融合（Dense+Sparse+Graph） |
+| 路由 | 无 | Supervisor 多 Agent 意图路由 |
+| 图谱 | 无 | Neo4j 知识图谱 + 社区摘要 |
+| 自纠错 | 无 | Planner + Critique + Replan |
+| 人机协同 | 无 | HITL 中断/恢复 |
+| 流式 | 基础 | 全链路 SSE + Trace Canvas |
+| 评测 | 无 | RAGAS + A/B 对比 |
+| 降级 | 无 | 熔断器 + 负载感知降级 |
+
+本质区别：RetrievalQA 是一个 Chain（线性），Ragent AI 是一个 Graph（有循环、并行、条件路由）。
+
+### Q29: 知识图谱的冷启动问题怎么解决？
+
+**回答**：
+
+**问题**：新部署时 Neo4j 是空的，图谱检索返回空结果，全局图谱搜索也没有社区摘要。
+
+**解决方案**：
+1. **文档上传后自动抽取**：每次文档上传，L2 文本自动经过 LLM 实体抽取写入 Neo4j
+2. **离线社区聚类**：`scripts/run_community_clustering.py` 从 Neo4j 拉取全图 → Leiden 聚类 → LLM 生成摘要 → 写入 Milvus
+3. **渐进式增强**：图谱为空时，系统自动降级为纯向量检索（`safe_graph_search` 的 fallback）
+4. **增量更新**：新文档上传后重新运行社区聚类脚本，更新摘要
+
+---
+
+## 20. 高频概念追问
+
+### Q30: RRF 和 BM25 的区别？
+
+**回答**：
+- **BM25**：一种稀疏检索算法，基于词频（TF）和逆文档频率（IDF）计算文档与查询的相关性。擅长精确关键词匹配。
+- **RRF**：一种融合算法，不直接计算相关性，而是将多路检索的排名做加权融合。输入是各通道的排名列表，输出是融合后的排名。
+
+关系：BM25 是一路检索通道，RRF 是将 BM25 的结果和 Dense 向量检索的结果融合的方法。
+
+### Q31: HNSW 索引的原理？
+
+**回答**：
+
+HNSW（Hierarchical Navigable Small World）是一种近似最近邻（ANN）索引算法：
+
+1. **多层图结构**：底层包含所有向量，上层是稀疏的"高速公路"
+2. **贪心搜索**：从顶层开始，每层找最近的邻居，向下一层跳转
+3. **小世界特性**：任意两个节点之间的平均距离很短（O(log N)）
+
+**Milvus 中的配置**：
+- `M=16`：每个节点的最大连接数
+- `efConstruction=200`：构建时的搜索宽度
+- `ef=64`：查询时的搜索宽度（越大越精确，越慢）
+
+**为什么选 HNSW？** 在 Milvus 中，HNSW 是稠密向量的默认索引，查询延迟低（<10ms），召回率高（>95%），但构建时间较长。
+
+### Q32: LangGraph 和 LangChain Chain 的区别？
+
+**回答**：
+
+| 维度 | LangChain Chain | LangGraph |
+|------|----------------|-----------|
+| 拓扑 | 线性（A→B→C） | 图（支持循环、并行、条件） |
+| 状态 | 无状态 | TypedDict 全局状态 |
+| 循环 | 不支持 | 支持（如 Critique→Replan 循环） |
+| 并行 | 不支持 | 支持（Send fan-out） |
+| 中断 | 不支持 | 原生 interrupt() + Command(resume=) |
+| 可视化 | 无 | LangGraph Studio |
+
+**本项目为什么选 LangGraph？** 因为需要：
+1. Critique → Replan → Supervisor 循环（Chain 无法实现）
+2. 多 Worker 并行执行（Chain 无法实现）
+3. HITL 中断/恢复（Chain 无法实现）
+
+### Q33: 为什么用 Milvus 而不是 Pinecone/Weaviate？
+
+**回答**：
+
+1. **开源免费**：Pinecone 是 SaaS，有成本；Milvus 是开源的
+2. **原生混合检索**：Milvus 2.5 原生支持 Dense + Sparse 双通道，Pinecone/Weaviate 需要自建
+3. **动态 Schema**：`enable_dynamic_field=True`，社区摘要和文档块共用 Collection
+4. **中国社区**：Milvus 是 Zilliz 公司（中国）的产品，中文文档和社区支持好
+5. **Docker 部署**：单机版 standalone 一键启动，适合开发和小规模生产
+
+### Q34: structlog 和标准 logging 的区别？
+
+**回答**：
+
+```python
+# 标准 logging
+logging.info("user logged in", user_id=123)
+# 输出: INFO:root:user logged in
+
+# structlog
+log.info("user_logged_in", user_id=123)
+# 输出: {"event": "user_logged_in", "user_id": 123, "level": "info", "timestamp": "2026-06-01T06:00:00Z"}
+```
+
+**优势**：
+- 结构化 JSON 输出，ELK/Loki 可直接索引
+- 关键字参数自动成为 JSON 字段，不需要手动拼接字符串
+- 性能更好（延迟字符串格式化）
+
+---
+
 ## 附录：项目亮点总结（面试用）
 
 1. **完整的 RAG 系统**：混合检索 + Rerank + Auto-Merging + 查询扩展，不是简单 demo

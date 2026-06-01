@@ -387,6 +387,19 @@ Neo4j Full Graph
 | **Docker Compose Full Stack** | 10 services: etcd + MinIO + Milvus + Attu + Neo4j + MySQL + Redis + Jaeger + Prometheus + Grafana + API + Worker |
 | **Resource Limits** | API container: 2G memory limit; Worker container: 4G memory limit (heavy LLM extraction) |
 
+### Adaptive Retrieval & Load-Aware Degradation (v12.0)
+
+| Feature | Description |
+|---------|-------------|
+| **Query Profiler** | `backend/agent/query_profiler.py` — lightweight intent classifier using keyword matching (60%) + Embedding cosine similarity (40%); classifies queries into L1 (factual), L2 (reasoning), L3 (macro summary) before Supervisor LLM |
+| **Dynamic RRF Weights** | `backend/rag/dynamic_rrf.py` + `config/weight_matrix.yaml` — intent-driven weight matrix replaces static env vars; L1: Dense 70%, L2: Graph 65%, L3: balanced 35-35 |
+| **Global Load Monitor** | `backend/ha/load_monitor.py` — Redis sliding-window QPS counter with 3-state machine: NORMAL (full pipeline), WARNING (skip Critique/Replan), CRITICAL (circuit-break Neo4j + Tavily) |
+| **Adaptive Degradation** | `route_after_critique` checks system state before retry; `local_graph_search_node` and `web_searcher_node` degrade under CRITICAL load |
+| **SSE Profiler Events** | New `query_profiler` and `system_state` events pushed to frontend for real-time intent visualization |
+| **Prometheus Load Metrics** | `system_load_state` (Gauge), `query_qps` (Gauge), `query_profiler_distribution` (Counter by intent level) |
+| **A/B Evaluation Script** | `scripts/run_ab_evaluation.py` — static (v11) vs dynamic (v12) comparison with per-intent RAGAS metrics and latency stats |
+| **Locust Load Test** | `scripts/run_load_test.py` — concurrent load testing with weighted task distribution across L1/L2/L3 queries |
+
 ---
 
 ## Tech Stack
@@ -968,6 +981,18 @@ This will:
 - [x] Sync fallback: graceful degradation if Redis unavailable
 - [x] Docker Compose full stack: MySQL, Redis, API, Worker services with resource limits
 - [x] 65 unit tests (v10 + v11 fingerprint + incremental upload)
+
+### v12.0 — Adaptive Retrieval & Load-Aware Degradation ✓
+
+- [x] Query Profiler: lightweight intent classifier (keyword + embedding similarity, L1/L2/L3)
+- [x] Dynamic RRF weights: intent-driven weight matrix via YAML config (replaces static env vars)
+- [x] Global load monitor: Redis sliding-window QPS counter with NORMAL/WARNING/CRITICAL states
+- [x] Adaptive degradation: WARNING skips Critique/Replan, CRITICAL circuit-breaks Neo4j + Tavily
+- [x] SSE events: `query_profiler` and `system_state` pushed to frontend
+- [x] Prometheus metrics: `system_load_state`, `query_qps`, `query_profiler_distribution`
+- [x] Locust load testing script with L1/L2/L3 query coverage
+- [x] A/B evaluation script: static vs dynamic chain comparison
+- [x] 37 new unit/integration tests, 118 total passing with real databases
 
 ### v7.x — Planned
 

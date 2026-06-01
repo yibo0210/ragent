@@ -87,7 +87,7 @@ MCP (Model Context Protocol) · Echarts · aiohttp
 
 **GraphRAG**: Upload → L2 chunks → LLM extraction → Neo4j MERGE (entity + relation + source_chunks). Offline: `scripts/run_community_clustering.py` → Leiden → summaries → Milvus + MySQL.
 
-**SSE Streaming**: `routing`, `agent_start/done`, `rag_step`, `graph_expand`, `community_match`, `content`, `trace`, `agent_trace`, `hitl_interrupt`, `error`. v8 新增: `plan_generated`, `critique_feedback`, `self_correction`. v9 新增: `mcp_tool_call`, `mcp_tool_result`.
+**SSE Streaming**: `routing`, `agent_start/done`, `rag_step`, `graph_expand`, `community_match`, `content`, `trace`, `agent_trace`, `hitl_interrupt`, `error`. v8 新增: `plan_generated`, `critique_feedback`, `self_correction`. v9 新增: `mcp_tool_call`, `mcp_tool_result`. v12 新增: `query_profiler`, `system_state`.
 
 **HITL**: LangGraph `interrupt()` (scenario A: low confidence RAG, scenario B: non-SELECT SQL). Redis lock → HTTP 423 during pending. Resume via `Command(resume=...)`.
 
@@ -146,6 +146,15 @@ MCP (Model Context Protocol) · Echarts · aiohttp
 | `backend/ha/circuit_breaker.py` | Circuit breaker state machine + LLM/Tavily protection |
 | `backend/ha/retry.py` | tenacity exponential backoff retry decorator |
 | `backend/ha/degradation.py` | Neo4j timeout → Dense+Sparse fallback |
+| `backend/ha/load_monitor.py` | Redis sliding-window QPS monitor + NORMAL/WARNING/CRITICAL state machine |
+| `backend/agent/query_profiler.py` | Lightweight intent classifier: keyword + embedding → L1/L2/L3 |
+| `backend/rag/dynamic_rrf.py` | Intent-driven RRF weight matrix (loads from config/weight_matrix.yaml) |
+| `config/weight_matrix.yaml` | RRF weight config: L1 Dense 70%, L2 Graph 65%, L3 balanced |
+| `scripts/run_ab_evaluation.py` | A/B evaluation: static vs dynamic chain comparison |
+| `scripts/run_load_test.py` | Locust load test with L1/L2/L3 query coverage |
+| `tests/test_query_profiler.py` | Query Profiler unit + integration tests |
+| `tests/test_load_monitor.py` | Load Monitor unit tests (mocked Redis) |
+| `tests/test_dynamic_rrf.py` | Dynamic RRF weight matrix tests |
 | `scripts/run_community_clustering.py` | Offline: graph→cluster→summarize→index |
 | `scripts/run_entity_resolution.py` | Offline: entity dedup pipeline |
 | `scripts/run_evaluation.py` | RAG eval: 5 modes (retrieval/pipeline/e2e/graph/graph_compare) + latency + A/B compare |
@@ -211,6 +220,11 @@ MCP (Model Context Protocol) · Echarts · aiohttp
 - **v11 Incremental pipeline**: `fingerprint.py` computes SHA-256 per file. `doc_lifecycle.upsert_document_index()` tracks hash/version in `DocumentIndex` table. Upload endpoint checks hash → skip if unchanged. Changed files trigger: Milvus delete by filename → parent_chunk_store delete → `graph_cleanup.cleanup_by_filename()` → re-extract → re-insert.
 - **v11 Async task queue**: `arq` (Redis-based) dispatches `run_ingestion_task` to `backend/pipeline/ingestion_worker.py`. Upload returns HTTP 202 immediately. Worker initializes its own DB/services. Fallback to sync if Redis unavailable.
 - **v11 Milvus is_deleted fix**: `writer.py` now sets `is_deleted: False` on insert. Previously the field existed in schema and was filtered on retrieval but never set — worked by accident.
+- **v12 Query Profiler**: `QueryProfiler.profile(query)` returns `QueryIntent(level, complexity_score, matched_keywords, embedding_similarity)`. Keyword matching 60% + Embedding cosine similarity 40%. Short queries (<5 chars) forced to L1. Module-level `_prototype_embeddings` cache for prototype query embeddings.
+- **v12 Dynamic RRF**: `get_weights_for_intent(intent_level)` loads from `config/weight_matrix.yaml` (YAML hot-reload via `reload_weight_matrix()`). L1: Dense 70%, L2: Graph 65%, L3: balanced. Passed through `run_rag_graph(intent_level=...)` → `retrieve_documents(intent_level=...)`.
+- **v12 Load Monitor**: `LoadMonitor` uses Redis INCR+EXPIRE per-second counters, `mget` sliding window. `get_state()` cached 1s. `should_skip_critique()` (WARNING+), `should_circuit_break_neo4j()` / `should_circuit_break_tavily()` (CRITICAL only). Module-level singleton `get_load_monitor()`.
+- **v12 Adaptive degradation**: `route_after_critique` checks `monitor.should_skip_critique()` — WARNING+ skips replan. `local_graph_search_node` checks `should_circuit_break_neo4j()` — CRITICAL falls back to `retrieve_documents`. `web_searcher_node` checks `should_circuit_break_tavily()` — CRITICAL skips Tavily, triggers existing RAG fallback.
+- **v12 SSE events**: `query_profiler` event (intent level, score, keywords) emitted after supervisor routing. `system_state` event (normal/warning/critical, qps, thresholds) emitted per request.
 - **Checkpointer pending_writes**: `_load_writes` must return `(task_id, channel, value)` triples for LangGraph 0.2+ compatibility. Old format `(channel, value)` causes "not enough values to unpack (expected 3, got 2)".
 - **Milvus pymilvus 2.5 API**: `client.search()` uses `search_params` not `param`. Silent 0-result failure with old param name.
 - **Milvus gRPC reconnect**: `_ensure_connected()` calls `get_load_state()` before each query; resets client on failure to prevent "closed channel" errors.

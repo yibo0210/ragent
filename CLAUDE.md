@@ -89,6 +89,8 @@ MCP (Model Context Protocol) · Echarts · aiohttp
 
 **SSE Streaming**: `routing`, `agent_start/done`, `rag_step`, `graph_expand`, `community_match`, `content`, `trace`, `agent_trace`, `hitl_interrupt`, `error`. v8 新增: `plan_generated`, `critique_feedback`, `self_correction`. v9 新增: `mcp_tool_call`, `mcp_tool_result`. v12 新增: `query_profiler`, `system_state`.
 
+v13: 增量图聚类引擎 — 文档摄入后自动触发局部补丁（新节点归入邻居多数社区）或子图重构（桥接多社区时仅对局部子图运行 Louvain），替代全量 Louvain 重算。脏位驱动的定向摘要生成（is_dirty 标记），只对受影响社区重新生成 LLM 摘要，Token 成本降 90%+。Redis Streams 消息总线（doc_ingest → graph_extract → vector_sync 三阶段管线）替代 arq 单队列。
+
 **HITL**: LangGraph `interrupt()` (scenario A: low confidence RAG, scenario B: non-SELECT SQL). Redis lock → HTTP 423 during pending. Resume via `Command(resume=...)`.
 
 ### Key Files
@@ -131,6 +133,10 @@ MCP (Model Context Protocol) · Echarts · aiohttp
 | `backend/storage/parent_chunk_store.py` | MySQL parent chunk (L1/L2) store for auto-merge |
 | `backend/graph/community.py` | Leiden clustering, summaries, Milvus indexing |
 | `backend/graph/entity_resolution.py` | Two-stage entity dedup: edit-distance + LLM + Cypher merge |
+| `backend/graph/incremental_clustering.py` | Incremental graph clustering: local patching + subgraph re-clustering |
+| `backend/pipeline/stream_queue.py` | Redis Streams message queue: XADD/XREADGROUP/XACK with consumer groups |
+| `backend/pipeline/stream_consumer.py` | Three-stage stream consumer: doc_ingest → graph_extract → vector_sync |
+| `backend/pipeline/summary_updater.py` | Dirty-flag-driven targeted summary regeneration |
 | `backend/milvus/client.py` | Milvus hybrid search + delete_by_chunk_ids + is_deleted filter |
 | `backend/milvus/writer.py` | Batch write documents to Milvus with progress callback |
 | `backend/embedding/service.py` | Dense (Qwen API) + Sparse (BM25) |
@@ -163,6 +169,8 @@ MCP (Model Context Protocol) · Echarts · aiohttp
 | `scripts/generate_report.py` | HTML evaluation report: radar chart + bar chart + routing matrix + latency |
 | `scripts/ci_evaluation.sh` | CI threshold check: context_precision ≥ 0.6, faithfulness ≥ 0.7, answer_relevancy ≥ 0.6 |
 | `scripts/run_benchmark.py` | Concurrent cache benchmark |
+| `scripts/benchmark_incremental.py` | Benchmark: full Louvain vs incremental clustering comparison |
+| `tests/test_incremental_clustering.py` | Incremental clustering unit tests (mocked Neo4j) |
 | `prometheus.yml` | Prometheus scrape config (targets app :8000) |
 | `tests/test_doc_lifecycle.py` | Document soft-delete unit tests |
 | `tests/test_evaluation.py` | Evaluation unit tests (golden dataset, RRF fusion, metrics signatures) |
@@ -225,6 +233,9 @@ MCP (Model Context Protocol) · Echarts · aiohttp
 - **v12 Load Monitor**: `LoadMonitor` uses Redis INCR+EXPIRE per-second counters, `mget` sliding window. `get_state()` cached 1s. `should_skip_critique()` (WARNING+), `should_circuit_break_neo4j()` / `should_circuit_break_tavily()` (CRITICAL only). Module-level singleton `get_load_monitor()`.
 - **v12 Adaptive degradation**: `route_after_critique` checks `monitor.should_skip_critique()` — WARNING+ skips replan. `local_graph_search_node` checks `should_circuit_break_neo4j()` — CRITICAL falls back to `retrieve_documents`. `web_searcher_node` checks `should_circuit_break_tavily()` — CRITICAL skips Tavily, triggers existing RAG fallback.
 - **v12 SSE events**: `query_profiler` event (intent level, score, keywords) emitted after supervisor routing. `system_state` event (normal/warning/critical, qps, thresholds) emitted per request.
+- **v13 Incremental clustering**: `patch_new_node(node_name)` checks 1-hop neighbors' community_id; if >60% share one community → direct assignment (zero cost); otherwise `recluster_subgraph(affected_communities)` extracts local subgraph and runs Louvain only on it. `incremental_cluster_after_ingest(filename)` orchestrates the full flow.
+- **v13 Dirty-flag summaries**: `CommunitySummary` MySQL table has `is_dirty` boolean. `mark_communities_dirty(cids)` sets flag on affected communities. `update_dirty_summaries()` scans dirty rows, regenerates only those, resets flag. Token savings 80-100%.
+- **v13 Redis Streams**: `StreamQueue` wraps XADD/XREADGROUP/XACK. Three streams (doc_ingest, graph_extract, vector_sync) with consumer groups. `ack_and_publish()` chains stages. Dead letter after 3 retries. Falls back to arq if Redis unavailable.
 - **Checkpointer pending_writes**: `_load_writes` must return `(task_id, channel, value)` triples for LangGraph 0.2+ compatibility. Old format `(channel, value)` causes "not enough values to unpack (expected 3, got 2)".
 - **Milvus pymilvus 2.5 API**: `client.search()` uses `search_params` not `param`. Silent 0-result failure with old param name.
 - **Milvus gRPC reconnect**: `_ensure_connected()` calls `get_load_state()` before each query; resets client on failure to prevent "closed channel" errors.

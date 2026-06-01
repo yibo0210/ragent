@@ -4,6 +4,9 @@ import community as community_louvain
 from backend.storage.graph_client import run_cypher, write_cypher
 from backend.milvus.client import MilvusManager
 from backend.embedding.service import EmbeddingService
+from backend.observability import get_logger
+
+logger = get_logger("graph.community")
 
 
 def build_graph_from_neo4j() -> nx.Graph:
@@ -77,7 +80,32 @@ def generate_community_summary(community_id: str) -> str:
 
     model = _get_worker_model()
     response = model.invoke([HumanMessage(content=prompt)])
-    return response.content
+    summary_text = response.content
+
+    # Persist to MySQL
+    from backend.storage.database import SessionLocal
+    from backend.storage.models import CommunitySummary
+
+    entity_count = len(rows)
+    db = SessionLocal()
+    try:
+        existing = db.query(CommunitySummary).filter_by(community_id=community_id).first()
+        if existing:
+            existing.summary_text = summary_text
+            existing.entity_count = entity_count
+            existing.is_dirty = False
+        else:
+            db.add(CommunitySummary(
+                community_id=community_id,
+                summary_text=summary_text,
+                entity_count=entity_count,
+                is_dirty=False,
+            ))
+        db.commit()
+    finally:
+        db.close()
+
+    return summary_text
 
 
 def generate_all_summaries(partition: dict[str, int]) -> list[dict]:
@@ -119,3 +147,70 @@ def index_summaries_to_milvus(summaries: list[dict]):
 
     milvus.insert(insert_data)
     print(f"[SUMMARY] Indexed {len(summaries)} summaries to Milvus")
+
+
+def mark_communities_dirty(community_ids: list[str]) -> int:
+    """Mark communities as needing summary regeneration. Returns count updated."""
+    if not community_ids:
+        return 0
+    from backend.storage.database import SessionLocal
+    from backend.storage.models import CommunitySummary
+
+    db = SessionLocal()
+    try:
+        count = 0
+        for cid in community_ids:
+            existing = db.query(CommunitySummary).filter_by(community_id=cid).first()
+            if existing:
+                existing.is_dirty = True
+                count += 1
+            else:
+                db.add(CommunitySummary(
+                    community_id=cid,
+                    summary_text="",
+                    entity_count=0,
+                    is_dirty=True,
+                ))
+                count += 1
+        db.commit()
+        return count
+    finally:
+        db.close()
+
+
+def update_dirty_summaries() -> int:
+    """Regenerate summaries only for dirty communities. Returns count updated."""
+    from backend.storage.database import SessionLocal
+    from backend.storage.models import CommunitySummary
+
+    db = SessionLocal()
+    try:
+        dirty = db.query(CommunitySummary).filter_by(is_dirty=True).all()
+        if not dirty:
+            return 0
+
+        updated = 0
+        for cs in dirty:
+            try:
+                generate_community_summary(cs.community_id)
+                updated += 1
+            except Exception as e:
+                logger.warning("summary_update_failed", community_id=cs.community_id, error=str(e))
+
+        return updated
+    finally:
+        db.close()
+
+
+def get_community_count() -> dict:
+    """Get counts of total, dirty, and clean communities."""
+    from backend.storage.database import SessionLocal
+    from backend.storage.models import CommunitySummary
+
+    db = SessionLocal()
+    try:
+        total = db.query(CommunitySummary).count()
+        dirty = db.query(CommunitySummary).filter_by(is_dirty=True).count()
+        return {"total": total, "dirty": dirty, "clean": total - dirty}
+    finally:
+        db.close()

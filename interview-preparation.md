@@ -8,6 +8,7 @@
 4. [GraphRAG 知识图谱检索](#4-graphrag-知识图谱检索)
    - [4.6 本体约束图谱抽取 (v10)](#46-本体约束图谱抽取-v10)
    - [4.7 增量更新与异步管线 (v11)](#47-增量更新与异步管线-v11)
+   - [4.8 流式增量图谱引擎 (v13)](#48-流式增量图谱引擎-v13)
 5. [多智能体编排系统](#5-多智能体编排系统)
 6. [向量数据库 Milvus](#6-向量数据库-milvus)
 7. [图数据库 Neo4j](#7-图数据库-neo4j)
@@ -426,6 +427,46 @@ cleanup_by_filename(filename)
 
 **面试话术**：
 > "v11 解决的是'更新效率'问题。我在三个层面做了改造：第一层是文档指纹，SHA-256 Hash 相同直接跳过，秒级返回；第二层是图谱增量清理，重新上传时先按文件名清理旧的边和孤岛节点再重建，避免图谱膨胀；第三层是用 arq + Redis 做异步队列，上传请求立即返回，后台 Worker 执行重活，Redis 挂了自动降级回同步。整个系统从'每次全量重建'变成了'有变化才更新'。"
+
+### 4.8 流式增量图谱引擎 (v13)
+
+**问题**：图谱构建是"全局停机离线批处理"——每次手动运行 `run_community_clustering.py`，拉取全图、全量 Louvain、全量摘要生成。每天新增几十个节点却要重算数万节点的聚类，Token 成本与社区数量线性增长。
+
+**三层改造**：
+
+**1. 增量图聚类（核心算法）**
+
+两种策略，按需选择：
+
+- **策略 A：局部补丁**（零算法开销）：新节点插入后，查询 1-hop 邻居的 community_id。如果 >60% 邻居属于同一社区 C，直接将新节点归入 C。O(1) 复杂度。
+- **策略 B：子图重构**（最小算法开销）：新节点桥接多个社区时，用 Cypher 提取受影响社区的局部子图，仅对该子图运行 Louvain。Benchmark 显示 5K 节点规模下加速 109x。
+
+```python
+def patch_new_node(node_name):
+    neighbors = get_neighbor_communities(node_name)
+    cid_counts = Counter(cid for cid in neighbors.values() if cid)
+    top_cid, top_count = cid_counts.most_common(1)[0]
+    if top_count / total >= 0.6:
+        return {"action": "patched", "community_id": top_cid}
+    else:
+        return {"action": "recluster", "affected_communities": list(cid_counts.keys())}
+```
+
+**2. 脏位驱动的定向摘要生成**
+
+`CommunitySummary` 表新增 `is_dirty` 布尔字段。增量聚类改变某社区成员时标记为 dirty。后台任务只对 dirty 社区调用 LLM 生成摘要，复位 is_dirty。Token 成本节省 80-100%。
+
+**3. Redis Streams 消息总线**
+
+用 Redis Streams 替代 arq 单队列，支持三阶段管线：
+- `doc_ingest`：解析 + 切片 + 向量化
+- `graph_extract`：LLM 实体抽取
+- `vector_sync`：Neo4j 写入 + 增量聚类 + 摘要更新
+
+支持消费者组、消息持久化、死信处理。
+
+**面试话术**：
+> "v13 解决的是'图谱构建效率'问题。原来的全量 Louvain 聚类在万级节点规模下需要十几秒，每次文档上传都要重算。我设计了两层增量策略：第一层是局部补丁，新节点如果和某个社区高度连接就直接归入，零算法开销；第二层是子图重构，只对受影响的社区运行 Louvain，5K 节点规模下加速 109 倍。配合脏位机制，只对成员变化的社区重新生成摘要，Token 成本节省 90% 以上。消息队列用 Redis Streams 替代 arq，支持三阶段管线和消费者组，为水平扩展打下基础。"
 
 ---
 
@@ -2350,3 +2391,6 @@ Critique：~1000 tokens（verification）
 9. **自动化评测**：RAGAS + Golden Dataset + A/B 对比 + 图谱拓扑统计，用数据说话
 10. **生产级设计**：熔断、降级、重试、缓存、HITL、异步队列、全局负载监控，不是 toy project
 11. **容器化部署**：Docker Compose 10 服务一键拉起，API + Worker 双进程，资源限制
+12. **增量图聚类**：局部补丁 + 子图重构替代全量 Louvain，5K 节点加速 109x（v13）
+13. **脏位驱动摘要**：is_dirty 标记 + 定向 LLM 调用，Token 成本降 90%+（v13）
+14. **Redis Streams 管线**：三阶段消费者组 + 死信处理，替代 arq 单队列（v13）

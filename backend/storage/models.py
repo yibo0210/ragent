@@ -4,7 +4,7 @@
 """
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
@@ -82,6 +82,8 @@ class CommunitySummary(Base):
     community_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
     summary_text: Mapped[str] = mapped_column(Text, nullable=False)
     entity_count: Mapped[int] = mapped_column(Integer, default=0)
+    is_dirty: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    last_modified: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 
 

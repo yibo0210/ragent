@@ -400,6 +400,16 @@ Neo4j Full Graph
 | **A/B Evaluation Script** | `scripts/run_ab_evaluation.py` — static (v11) vs dynamic (v12) comparison with per-intent RAGAS metrics and latency stats |
 | **Locust Load Test** | `scripts/run_load_test.py` — concurrent load testing with weighted task distribution across L1/L2/L3 queries |
 
+### Streaming Incremental Graph Engine (v13.0)
+
+| Feature | Description |
+|---------|-------------|
+| **Incremental Graph Clustering** | `backend/graph/incremental_clustering.py` — local patching (60% neighbor consensus) + subgraph re-clustering (Louvain on affected communities only), replacing full-graph recomputation |
+| **Dirty-Flag Summary Updates** | `CommunitySummary.is_dirty` boolean drives targeted regeneration — only dirty communities get LLM summaries, 80-100% Token savings |
+| **Redis Streams Pipeline** | `backend/pipeline/stream_queue.py` — three-stage message bus (doc_ingest → graph_extract → vector_sync) with consumer groups, dead letter handling, and pipeline chaining |
+| **Three-Stage Consumer** | `backend/pipeline/stream_consumer.py` — stateless stage handlers for parsing, LLM extraction, and Neo4j/Milvus sync |
+| **Benchmark Script** | `scripts/benchmark_incremental.py` — full Louvain vs incremental comparison across graph scales (1K/5K/20K nodes) |
+
 ---
 
 ## Tech Stack
@@ -993,6 +1003,15 @@ This will:
 - [x] Locust load testing script with L1/L2/L3 query coverage
 - [x] A/B evaluation script: static vs dynamic chain comparison
 - [x] 37 new unit/integration tests, 118 total passing with real databases
+
+### v13.0 — Streaming Incremental Graph Engine ✓
+
+- [x] Incremental clustering: local patching (neighbor consensus) + subgraph re-clustering (Louvain on affected communities)
+- [x] Dirty-flag summary regeneration: `is_dirty` on CommunitySummary, targeted LLM calls
+- [x] Redis Streams message queue: three-stage pipeline with consumer groups
+- [x] Three-stage consumer: doc_ingest → graph_extract → vector_sync
+- [x] Benchmark script: full vs incremental time comparison + Token cost analysis
+- [x] 10 new unit tests for incremental clustering
 
 ### v7.x — Planned
 

@@ -114,6 +114,23 @@ async def run_ingestion_task(ctx, filename: str, file_path: str, file_hash: str)
         except Exception as e:
             print(f"[WORKER] Graph extraction failed (non-fatal): {e}")
 
+        # v13: 增量图聚类
+        try:
+            from backend.graph.incremental_clustering import incremental_cluster_after_ingest
+            cluster_result = incremental_cluster_after_ingest(filename)
+            print(f"[v13] 增量聚类完成: patched={cluster_result['patched']}, reclustered={cluster_result['reclustered']}")
+        except Exception as e:
+            print(f"[v13] 增量聚类失败（非致命）: {e}")
+
+        # v13: 定向摘要更新
+        try:
+            from backend.pipeline.summary_updater import run_summary_update_cycle
+            summary_result = run_summary_update_cycle()
+            if summary_result.get("updated", 0) > 0:
+                print(f"[v13] 摘要更新: {summary_result['updated']} 个社区")
+        except Exception as e:
+            print(f"[v13] 摘要更新失败（非致命）: {e}")
+
     # 6. Update document index with final chunk count
     upsert_document_index(filename, file_hash, total_chunks)
 

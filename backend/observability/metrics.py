@@ -26,6 +26,15 @@ active_requests = Gauge("active_requests", "当前活跃请求数")
 circuit_breaker_state = Gauge(
     "circuit_breaker_state", "熔断器状态 (0=CLOSED, 1=OPEN, 2=HALF_OPEN)", ["service"]
 )
+system_state = Gauge(
+    "system_load_state", "系统负载状态 (0=NORMAL, 1=WARNING, 2=CRITICAL)"
+)
+query_qps = Gauge(
+    "query_qps", "当前查询 QPS"
+)
+profiler_distribution = Counter(
+    "query_profiler_distribution", "Query Profiler 意图分布", ["level"]
+)
 
 
 class Metrics:
@@ -65,6 +74,24 @@ class Metrics:
         if not METRICS_ENABLED:
             return
         circuit_breaker_state.labels(service=service).set(state)
+
+    @staticmethod
+    def set_system_state(state_value: int):
+        if not METRICS_ENABLED:
+            return
+        system_state.set(state_value)
+
+    @staticmethod
+    def set_qps(qps: float):
+        if not METRICS_ENABLED:
+            return
+        query_qps.set(qps)
+
+    @staticmethod
+    def record_profiler_intent(level: str):
+        if not METRICS_ENABLED:
+            return
+        profiler_distribution.labels(level=level).inc()
 
 
 def init_metrics(app):

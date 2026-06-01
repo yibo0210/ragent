@@ -98,6 +98,7 @@ class RAGState(TypedDict):
     rag_trace: Optional[dict]
     grade_fail_count: int
     force_interrupt: bool
+    intent_level: Optional[str]  # v12: 意图级别
 
 
 def _format_docs(docs: List[dict]) -> str:
@@ -114,8 +115,9 @@ def _format_docs(docs: List[dict]) -> str:
 
 def retrieve_initial(state: RAGState) -> RAGState:
     query = state["question"]
+    intent_level = state.get("intent_level")
     emit_rag_step("🔍", "混合检索 — Dense向量+BM25稀疏向量在Milvus中双路召回", f"查询: {query[:50]}")
-    retrieved = retrieve_documents(query, top_k=5)
+    retrieved = retrieve_documents(query, top_k=5, intent_level=intent_level)
     results = retrieved.get("docs", [])
     retrieve_meta = retrieved.get("meta", {})
     context = _format_docs(results)
@@ -453,10 +455,11 @@ def build_rag_graph():
 rag_graph = build_rag_graph()
 
 
-def run_rag_graph(question: str) -> dict:
+def run_rag_graph(question: str, intent_level: str = None) -> dict:
     return rag_graph.invoke({
         "question": question,
         "query": question,
+        "intent_level": intent_level,  # v12: 传递意图标签
         "context": "",
         "docs": [],
         "route": None,

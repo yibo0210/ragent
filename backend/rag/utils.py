@@ -346,7 +346,7 @@ def step_back_expand(query: str) -> dict:
     }
 
 #整合「混合检索→重排→自动合并」全流程，提供容错兜底
-def retrieve_documents(query: str, top_k: int = 5) -> Dict[str, Any]:
+def retrieve_documents(query: str, top_k: int = 5, intent_level: str = None) -> Dict[str, Any]:
     candidate_k = max(top_k * 3, top_k)
     filter_expr = f"(chunk_level == {LEAF_RETRIEVE_LEVEL}) && (is_deleted != true)"
     try:
@@ -366,6 +366,14 @@ def retrieve_documents(query: str, top_k: int = 5) -> Dict[str, Any]:
         rerank_meta["retrieval_mode"] = "hybrid"
         rerank_meta["candidate_k"] = candidate_k
         rerank_meta["leaf_retrieve_level"] = LEAF_RETRIEVE_LEVEL
+        # v12: 记录意图级别到 meta
+        if intent_level:
+            from backend.rag.dynamic_rrf import get_weights_for_intent
+            dynamic_weights = get_weights_for_intent(intent_level)
+        else:
+            dynamic_weights = None
+        rerank_meta["intent_level"] = intent_level
+        rerank_meta["dynamic_weights"] = list(dynamic_weights) if dynamic_weights else None
         rerank_meta.update(merge_meta)
         return {"docs": merged_docs, "meta": rerank_meta}
     except Exception:

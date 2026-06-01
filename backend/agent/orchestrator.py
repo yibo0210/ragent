@@ -113,6 +113,8 @@ class SupervisorState(TypedDict):
     plan_steps_completed: list[str]     # 已完成的计划步骤
     # v9: MCP 工具状态
     tool_outputs: dict                  # {step_id: output_data} MCP 调用结果
+    # v12: Query 意图画像
+    query_intent: Optional[dict]        # Profiler 输出的意图标签
 
 
 # ---------------------------------------------------------------------------
@@ -247,6 +249,18 @@ def supervisor_node(state: SupervisorState) -> dict:
                 user_query = msg.content
                 break
 
+    # v12: Query Profiler — 轻量级意图分类
+    query_intent = None
+    try:
+        from backend.agent.query_profiler import QueryProfiler
+        profiler = QueryProfiler(use_embedding=True)
+        intent = profiler.profile(user_query)
+        query_intent = intent.to_dict()
+        log.info("query_profiled", level=intent.level, score=intent.complexity_score,
+                 keywords=intent.matched_keywords[:3])
+    except Exception:
+        query_intent = None
+
     # 调用 Supervisor LLM 进行路由决策（手动 JSON 解析）
     model = _get_supervisor_model()
     route_prompt = SUPERVISOR_SYSTEM_PROMPT + (
@@ -293,6 +307,7 @@ def supervisor_node(state: SupervisorState) -> dict:
     agent_trace["routing_reason"] = reason
     agent_trace["routing_is_temporal"] = is_temporal
     agent_trace["routing_temporal_year"] = temporal_year
+    agent_trace["query_intent"] = query_intent
 
     log.info("routing_decision", routes=routes, reason=reason, query=user_query[:100])
     for r in routes:
@@ -306,6 +321,7 @@ def supervisor_node(state: SupervisorState) -> dict:
         "agent_trace": agent_trace,
         "worker_outputs": {},
         "human_interfered_input": "",
+        "query_intent": query_intent,
     }
 
 
@@ -321,8 +337,12 @@ def rag_specialist_node(state: SupervisorState) -> dict:
                 user_query = msg.content
                 break
 
+    # v12: 传递意图标签到 RAG pipeline
+    query_intent = state.get("query_intent")
+    intent_level = query_intent.get("level") if query_intent else None
+
     # 执行 RAG 检索流水线
-    rag_result = run_rag_graph(user_query)
+    rag_result = run_rag_graph(user_query, intent_level=intent_level)
     docs = rag_result.get("docs", [])
     context = rag_result.get("context", "")
     rag_trace = rag_result.get("rag_trace", {})
@@ -376,8 +396,14 @@ def web_searcher_node(state: SupervisorState) -> dict:
                 user_query = msg.content
                 break
 
-    # 执行联网搜索
-    search_result = run_web_search(user_query)
+    # v12: CRITICAL 状态下跳过 Tavily 搜索
+    from backend.ha.load_monitor import get_load_monitor
+    monitor = get_load_monitor()
+    if monitor.should_circuit_break_tavily():
+        search_result = {"error": "CRITICAL 负载降级，跳过联网搜索", "results": []}
+    else:
+        # 执行联网搜索
+        search_result = run_web_search(user_query)
 
     # 搜索失败时降级到 RAG Specialist
     if search_result.get("error") or not search_result.get("results"):
@@ -600,10 +626,19 @@ def local_graph_search_node(state: SupervisorState) -> dict:
             "mode": "at_or_after",
         }
 
-    emit_graph_step("🔍", "局部图谱检索 — Milvus向量定位实体 → Neo4j 1-hop外扩邻居", agent="local_graph_search")
-    with tracer.start_as_current_span("agent.local_graph_search") as span:
-        span.set_attribute("query", user_query[:200])
-        result = safe_graph_search(user_query)
+    # v12: CRITICAL 状态下跳过图谱搜索，降级到纯向量
+    from backend.ha.load_monitor import get_load_monitor
+    monitor = get_load_monitor()
+    if monitor.should_circuit_break_neo4j():
+        emit_graph_step("⚡", "负载降级 — CRITICAL 状态，跳过 Neo4j 图谱搜索", agent="local_graph_search")
+        from backend.rag.utils import retrieve_documents
+        result = retrieve_documents(user_query, top_k=5)
+        result["mode"] = "degraded_load_critical"
+    else:
+        emit_graph_step("🔍", "局部图谱检索 — Milvus向量定位实体 → Neo4j 1-hop外扩邻居", agent="local_graph_search")
+        with tracer.start_as_current_span("agent.local_graph_search") as span:
+            span.set_attribute("query", user_query[:200])
+            result = safe_graph_search(user_query)
 
     emit_graph_step(
         "🔗",
@@ -885,8 +920,15 @@ def replan_node(state: SupervisorState) -> dict:
 
 def route_after_critique(state: SupervisorState) -> str:
     """Critique 后的条件路由。"""
+    from backend.ha.load_monitor import get_load_monitor
     critique = state.get("critique_result", {})
     retry = state.get("retry_count", 0)
+
+    # v12: 高负载时跳过 Critique 重试，直接输出
+    monitor = get_load_monitor()
+    if monitor.should_skip_critique() and not critique.get("is_valid", True):
+        log.info("critique_skipped_due_to_load", state=monitor.get_state().value)
+        return "end"
 
     if critique.get("is_valid", True):
         return "end"

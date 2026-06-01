@@ -429,6 +429,12 @@ async def chat_with_agent_stream(user_text: str, session_id: str = "default_sess
                             "agent": "supervisor",
                             "timestamp": asyncio.get_event_loop().time(),
                         })
+                        # v12: Query Profiler 事件
+                        if update.get("query_intent"):
+                            await output_queue.put({
+                                "type": "query_profiler",
+                                "intent": update["query_intent"],
+                            })
                         # worker agent_start 提前到路由时发送，trace 面板可实时显示活跃 agent
                         for worker in next_workers:
                             if worker != "supervisor":

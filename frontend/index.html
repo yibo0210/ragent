@@ -51,6 +51,10 @@
                     <i :class="theme === 'dark' ? 'fas fa-sun' : 'fas fa-moon'"></i>
                     <span class="nav-label">{{ theme === 'dark' ? '浅色模式' : '深色模式' }}</span>
                 </button>
+                <button class="sidebar-bottom-btn" @click="handleLogout" v-if="authToken">
+                    <i class="fas fa-right-from-bracket"></i>
+                    <span class="nav-label">退出 ({{ authUsername }})</span>
+                </button>
             </div>
 
             <!-- History List (always visible in sidebar) -->
@@ -88,6 +92,41 @@
 
         <!-- Main Area -->
         <main class="main-content">
+
+            <!-- Auth View -->
+            <div v-if="!authToken" class="auth-view">
+                <div class="auth-container">
+                    <div class="auth-card">
+                        <div class="auth-header">
+                            <img src="logo.svg" alt="Ragent" class="auth-logo">
+                            <h2>Ragent AI</h2>
+                            <p>企业级知识库助手</p>
+                        </div>
+                        <div class="auth-tabs">
+                            <button class="auth-tab" :class="{active: authMode === 'login'}" @click="authMode = 'login'">登录</button>
+                            <button class="auth-tab" :class="{active: authMode === 'register'}" @click="authMode = 'register'">注册</button>
+                        </div>
+                        <form @submit.prevent="handleAuth" class="auth-form">
+                            <div class="auth-field">
+                                <label>用户名</label>
+                                <input type="text" v-model="authUsername" placeholder="请输入用户名" required autocomplete="username">
+                            </div>
+                            <div class="auth-field">
+                                <label>密码</label>
+                                <input type="password" v-model="authPassword" placeholder="请输入密码" required autocomplete="current-password">
+                            </div>
+                            <div v-if="authMode === 'register'" class="auth-field">
+                                <label>组织名称</label>
+                                <input type="text" v-model="authTenantName" placeholder="请输入组织名称">
+                            </div>
+                            <button type="submit" class="auth-submit" :disabled="authLoading">
+                                {{ authLoading ? '处理中...' : (authMode === 'login' ? '登录' : '注册') }}
+                            </button>
+                            <div v-if="authError" class="auth-error">{{ authError }}</div>
+                        </form>
+                    </div>
+                </div>
+            </div>
 
             <!-- Settings Panel -->
             <div v-if="activeNav === 'settings'" class="settings-view">

@@ -432,7 +432,7 @@ Neo4j Full Graph
 | **Token Usage Tracking** | `backend/billing/token_tracker.py` — per-request `prompt_tokens`/`completion_tokens` recording to `token_usage_logs` table; `get_usage_summary()` aggregates by tenant over configurable period |
 | **Per-Tenant Rate Limiting** | `backend/billing/rate_limiter.py` — `TenantRateLimiter` uses Redis sliding-window counters per `tenant_id`; rules stored in `rate_limit_rules` table with tier-based QPS/token limits |
 | **Rate-Limit Middleware** | FastAPI HTTP middleware extracts tenant from JWT, checks QPS limit before request processing; returns 429 with `Retry-After` header when exceeded |
-| **SLA-Aware Degradation** | `LoadMonitor.get_tenant_degradation(tier)` — enterprise stays at full pipeline under CRITICAL load; premium skips Critique; free tier degrades to cache-only |
+| **SLA-Aware Degradation** | `_get_tenant_degradation(state)` in orchestrator resolves tenant SLA tier at each decision point — enterprise: full pipeline even under CRITICAL; premium: skips Critique at CRITICAL; free: skips Critique at WARNING, cache-only at CRITICAL |
 | **Audit Trail** | `backend/billing/audit.py` — immutable `audit_logs` table records every MCP tool call, SQL execution, and HITL event with `risk_level` classification |
 | **Audit Context Manager** | `AuditContext` wraps operations with before/after semantics; automatically logs exceptions as `risk_level="high"` |
 | **Billing API** | `GET /billing/usage` returns token consumption summary; `GET /billing/audit` returns paginated audit logs with action filter — both tenant-scoped |

@@ -196,23 +196,22 @@ class ConversationStorage:
         finally:
             db.close()
 
-    def delete_session(self, session_id: str) -> bool:
-        """删除指定会话，返回是否删除成功"""
+    def delete_session(self, session_id: str, tenant_id: int = None) -> bool:
+        """删除指定会话（按租户隔离），返回是否删除成功"""
         db = SessionLocal()
         try:
-            session = (
-                db.query(ChatSession)
-                .filter(ChatSession.session_id == session_id)
-                .first()
-            )
+            query = db.query(ChatSession).filter(ChatSession.session_id == session_id)
+            if tenant_id is not None:
+                query = query.filter(ChatSession.tenant_id == tenant_id)
+            session = query.first()
             if not session:
                 return False
 
-            tenant_id = session.tenant_id
+            t_id = session.tenant_id
             db.delete(session)
             db.commit()
             cache.delete(self._messages_cache_key(session_id))
-            cache.delete(self._sessions_cache_key(tenant_id))
+            cache.delete(self._sessions_cache_key(t_id))
             return True
         finally:
             db.close()
@@ -344,7 +343,8 @@ def chat_with_agent(user_text: str, session_id: str = "default_session", user_co
         "rag_trace": rag_trace,
         "agent_trace": agent_trace,
     }]
-    storage.save(session_id, messages, extra_message_data=extra_message_data)
+    storage.save(session_id, messages, extra_message_data=extra_message_data,
+                 tenant_id=(user_context or {}).get("tenant_id"))
 
     return {
         "response": response_content,
@@ -632,7 +632,8 @@ async def chat_with_agent_stream(user_text: str, session_id: str = "default_sess
         "rag_trace": final_rag_trace,
         "agent_trace": final_agent_trace,
     }]
-    storage.save(session_id, messages, extra_message_data=extra_message_data)
+    storage.save(session_id, messages, extra_message_data=extra_message_data,
+                 tenant_id=(user_context or {}).get("tenant_id"))
 
 
 # ---------------------------------------------------------------------------

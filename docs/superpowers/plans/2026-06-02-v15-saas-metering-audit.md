@@ -623,6 +623,43 @@ git commit -m "feat(v15): add rate-limit middleware with per-tenant SLA-aware de
 
 ---
 
+### Task 4b: Orchestrator SLA Degradation Wiring
+
+**Files:**
+- Modify: `backend/agent/orchestrator.py`
+
+- [x] **Step 1: Add `_get_tenant_degradation(state)` helper**
+
+Add a module-level helper function that resolves `tenant_id` from `user_context`, fetches the tenant's SLA tier from `RateLimitRule`, and returns the per-tenant degradation level from `LoadMonitor.get_tenant_degradation(tier)`. Falls back to `free` tier on DB failure.
+
+- [x] **Step 2: Replace `should_circuit_break_tavily()` in `web_searcher_node`**
+
+Use `_get_tenant_degradation(state) == "cache_only"` instead — only free tenants under CRITICAL load skip Tavily.
+
+- [x] **Step 3: Replace `should_circuit_break_neo4j()` in `local_graph_search_node`**
+
+Use `_get_tenant_degradation(state) == "cache_only"` instead — only free tenants under CRITICAL load fall back to pure vector retrieval.
+
+- [x] **Step 4: Replace `should_skip_critique()` in `route_after_critique`**
+
+Use `_get_tenant_degradation(state) in ("skip_critique", "cache_only")` instead — free tenants skip critique at WARNING, premium tenants at CRITICAL, enterprise always runs full.
+
+**Degradation matrix:**
+
+| System Load | Enterprise | Premium | Free |
+|------------|-----------|---------|------|
+| NORMAL | full | full | full |
+| WARNING | full | full | skip_critique |
+| CRITICAL | full | skip_critique | cache_only |
+
+**Commit:**
+```bash
+git add backend/agent/orchestrator.py
+git commit -m "feat(v15): wire SLA-aware tenant degradation into orchestrator decision points"
+```
+
+---
+
 ## Milestone 3: Audit Trail
 
 ### Task 5: Audit Logger
@@ -1110,7 +1147,8 @@ git commit -m "test(v15): add billing, rate limiting, and audit integration test
 | Milestone | Tasks | Core Change |
 |-----------|-------|-------------|
 | M1: Token Metering | 2 | TokenUsageLog model + tracker integrated into orchestrator |
-| M2: Rate Limiting | 2 | Redis sliding-window limiter + middleware + SLA-aware degradation |
+| M2: Rate Limiting | 3 | Redis sliding-window limiter + middleware + SLA degradation wired into orchestrator |
 | M3: Audit Trail | 2 | AuditLog model + context manager + MCP/SQL/HITL integration |
 | M4: Billing API | 2 | /billing/usage + /billing/audit endpoints + HITL webhook |
 | M5: Verification | 1 | Integration tests for all components |
+| M6: Security Hardening | 1 | Frontend auth UI + JWT on all requests; tenant isolation on session save/delete, document list/delete; ChatRequest min_length validation; unprotected endpoint lockdown (2026-06-02) |

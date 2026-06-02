@@ -5,6 +5,24 @@ from backend.storage.database import SessionLocal
 from backend.storage.models import ParentChunk, DocumentIndex
 
 
+def list_active_documents(tenant_id: int) -> list[dict]:
+    """列出指定租户下所有活跃文档。"""
+    with SessionLocal() as session:
+        docs = session.query(DocumentIndex).filter(
+            DocumentIndex.is_deleted == False,
+            DocumentIndex.tenant_id == tenant_id,
+        ).order_by(DocumentIndex.updated_at.desc()).all()
+        return [
+            {
+                "filename": d.filename,
+                "file_type": d.filename.split(".")[-1].upper() if "." in d.filename else "Unknown",
+                "chunk_count": d.chunk_count,
+                "uploaded_at": d.created_at.isoformat() if d.created_at else None,
+            }
+            for d in docs
+        ]
+
+
 def get_chunk_ids_by_filename(filename: str, include_deleted: bool = False) -> list[str]:
     """获取文档的所有 L3 chunk ID。"""
     with SessionLocal() as session:
@@ -18,8 +36,8 @@ def get_chunk_ids_by_filename(filename: str, include_deleted: bool = False) -> l
         return [r[0] if isinstance(r, tuple) else r for r in rows]
 
 
-def mark_document_deleted(filename: str) -> dict:
-    """软删除文档：标记 ParentChunk + DocumentIndex。"""
+def mark_document_deleted(filename: str, tenant_id: int = None) -> dict:
+    """软删除文档：标记 ParentChunk + DocumentIndex（按租户隔离）。"""
     with SessionLocal() as session:
         now = datetime.now(timezone.utc)
 
@@ -31,8 +49,11 @@ def mark_document_deleted(filename: str) -> dict:
         )
         result = session.execute(stmt)
 
-        # 标记 DocumentIndex
-        doc = session.query(DocumentIndex).filter_by(filename=filename).first()
+        # 标记 DocumentIndex（按租户隔离）
+        query = session.query(DocumentIndex).filter_by(filename=filename)
+        if tenant_id is not None:
+            query = query.filter(DocumentIndex.tenant_id == tenant_id)
+        doc = query.first()
         if doc:
             doc.is_deleted = True
             doc.version += 1

@@ -2,11 +2,11 @@
 
 定义聊天、会话、文档管理相关的请求/响应数据结构。
 """
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Literal, Optional, List
 
 class ChatRequest(BaseModel):
-    message: str
+    message: str = Field(..., min_length=1)
     session_id: Optional[str] = "default_session"
 
 

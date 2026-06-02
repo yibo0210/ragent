@@ -52,7 +52,7 @@ router = APIRouter()
 # ====================== 会话管理接口 ======================
 #获取会话历史消息 从 storage 读取指定会话的消息，封装为 MessageInfo 列表
 @router.get("/sessions/{session_id}", response_model=SessionMessagesResponse)
-async def get_session_messages(session_id: str):
+async def get_session_messages(session_id: str, user: UserContext = Depends(get_current_user)):
     try:
         messages = [
             MessageInfo(
@@ -78,11 +78,11 @@ async def list_sessions(user: UserContext = Depends(get_current_user)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-#删除指定会话 调用 storage 删除会话，不存在则抛 404
+#删除指定会话 调用 storage 删除会话（按租户隔离），不存在则抛 404
 @router.delete("/sessions/{session_id}", response_model=SessionDeleteResponse)
-async def delete_session(session_id: str):
+async def delete_session(session_id: str, user: UserContext = Depends(get_current_user)):
     try:
-        deleted = storage.delete_session(session_id)
+        deleted = storage.delete_session(session_id, tenant_id=user.tenant_id)
         if not deleted:
             raise HTTPException(status_code=404, detail="会话不存在")
         return SessionDeleteResponse(session_id=session_id, message="成功删除会话")
@@ -145,20 +145,13 @@ async def chat_stream_endpoint(request: ChatRequest, user: UserContext = Depends
         },
     )
 
-#列出所有已上传文档 查询 Milvus 中所有文档，按文件名聚合统计 chunk 数量，返回 DocumentInfo 列表
+#列出所有已上传文档 查询 MySQL document_index（按租户隔离），返回 DocumentInfo 列表
 @router.get("/documents", response_model=DocumentListResponse)
-async def list_documents():
+async def list_documents(user: UserContext = Depends(get_current_user)):
     try:
-        milvus_manager.init_collection()
-        results = milvus_manager.query(output_fields=["filename", "file_type"], limit=10000)
-        file_stats = {}
-        for item in results:
-            filename = item.get("filename", "")
-            file_type = item.get("file_type", "")
-            if filename not in file_stats:
-                file_stats[filename] = {"filename": filename, "file_type": file_type, "chunk_count": 0}
-            file_stats[filename]["chunk_count"] += 1
-        documents = [DocumentInfo(**stats) for stats in file_stats.values()]
+        from backend.storage.doc_lifecycle import list_active_documents
+        docs = list_active_documents(tenant_id=user.tenant_id)
+        documents = [DocumentInfo(**doc) for doc in docs]
         return DocumentListResponse(documents=documents)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取文档列表失败: {str(e)}")
@@ -351,12 +344,12 @@ async def upload_document(
 
 #删除指定文档 — 跨库级联软删除（MySQL + Milvus + Neo4j）
 @router.delete("/documents/{filename}", response_model=DocumentDeleteResponse)
-async def delete_document(filename: str):
+async def delete_document(filename: str, user: UserContext = Depends(get_current_user)):
     from backend.storage.doc_lifecycle import mark_document_deleted, get_chunk_ids_by_filename
     from backend.storage.graph_cleanup import full_cascade_cleanup
 
-    # 1. 数据库软删除
-    result = mark_document_deleted(filename)
+    # 1. 数据库软删除（按租户隔离）
+    result = mark_document_deleted(filename, tenant_id=user.tenant_id)
     if result["affected_chunks"] == 0:
         raise HTTPException(status_code=404, detail=f"文档 '{filename}' 不存在或已删除")
 
@@ -383,7 +376,7 @@ async def delete_document(filename: str):
 
 # ====================== HITL 中断恢复接口 ======================
 @router.post("/chat/hitl/resume")
-async def hitl_resume_endpoint(request: HitlResumeRequest):
+async def hitl_resume_endpoint(request: HitlResumeRequest, user: UserContext = Depends(get_current_user)):
     """恢复因 HITL 中断而挂起的图执行，流式返回恢复后的回答。"""
     from fastapi.responses import StreamingResponse
 
@@ -404,7 +397,7 @@ async def hitl_resume_endpoint(request: HitlResumeRequest):
 
 # ====================== MCP 管理接口 ======================
 @router.post("/mcp/connect")
-async def mcp_connect(server_name: str, url: str, transport: str = "stdio", args: list[str] = None):
+async def mcp_connect(server_name: str, url: str, transport: str = "stdio", args: list[str] = None, user: UserContext = Depends(get_current_user)):
     """连接到 MCP Server。"""
     from backend.agent.mcp_client import get_mcp_manager
     manager = get_mcp_manager()
@@ -416,7 +409,7 @@ async def mcp_connect(server_name: str, url: str, transport: str = "stdio", args
 
 
 @router.get("/mcp/servers")
-async def mcp_list_servers():
+async def mcp_list_servers(user: UserContext = Depends(get_current_user)):
     """列出所有已连接的 MCP Server。"""
     from backend.agent.mcp_client import get_mcp_manager
     manager = get_mcp_manager()
@@ -431,7 +424,7 @@ async def mcp_list_servers():
 
 
 @router.post("/mcp/disconnect/{server_name}")
-async def mcp_disconnect(server_name: str):
+async def mcp_disconnect(server_name: str, user: UserContext = Depends(get_current_user)):
     """断开指定 MCP Server。"""
     from backend.agent.mcp_client import get_mcp_manager
     manager = get_mcp_manager()

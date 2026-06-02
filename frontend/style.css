@@ -740,3 +740,43 @@ body {
   .welcome-sub { font-size: 14px; }
   .welcome { padding: 40px 14px 24px; }
 }
+
+/* ================= Auth View ================= */
+.auth-view {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 100vh; padding: 40px 20px;
+  background: var(--bg-page);
+}
+.auth-container { width: 100%; max-width: 420px; }
+.auth-card {
+  background: var(--bg-card); border-radius: 16px; padding: 40px 32px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+  border: 1px solid var(--border-color);
+}
+.auth-header { text-align: center; margin-bottom: 28px; }
+.auth-logo { width: 48px; height: 48px; border-radius: 12px; margin-bottom: 12px; }
+.auth-header h2 { font-family: 'Newsreader', serif; font-size: 24px; color: var(--text-main); margin: 0 0 4px; }
+.auth-header p { color: var(--text-secondary); font-size: 14px; margin: 0; }
+.auth-tabs { display: flex; gap: 0; margin-bottom: 24px; border-radius: 10px; background: var(--bg-sidebar); padding: 3px; }
+.auth-tab {
+  flex: 1; padding: 8px 0; border: none; background: none;
+  font-size: 14px; font-weight: 500; color: var(--text-regular); cursor: pointer;
+  border-radius: 8px; transition: all 0.15s;
+}
+.auth-tab.active { background: var(--bg-card); color: var(--text-main); box-shadow: 0 1px 2px rgba(0,0,0,0.06); }
+.auth-form { display: flex; flex-direction: column; gap: 16px; }
+.auth-field label { display: block; font-size: 13px; font-weight: 500; color: var(--text-regular); margin-bottom: 6px; }
+.auth-field input {
+  width: 100%; padding: 10px 14px; border: 1px solid var(--border-color);
+  border-radius: 10px; font-size: 14px; color: var(--text-main);
+  background: var(--bg-page); outline: none; transition: border-color 0.15s;
+  box-sizing: border-box;
+}
+.auth-field input:focus { border-color: var(--accent); }
+.auth-submit {
+  width: 100%; padding: 11px 0; border: none; border-radius: 10px;
+  background: var(--accent); color: #fff; font-size: 14px; font-weight: 600;
+  cursor: pointer; transition: opacity 0.15s;
+}
+.auth-submit:disabled { opacity: 0.6; cursor: not-allowed; }
+.auth-error { color: #dc2626; font-size: 13px; text-align: center; padding: 8px 12px; background: #fef2f2; border-radius: 8px; }

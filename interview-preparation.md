@@ -1339,16 +1339,58 @@ class TenantRateLimiter:
 ### 17.4 SLA 分级降级
 
 ```python
-# 结合 v12 的 LoadMonitor
-def get_tenant_degradation(self, tenant_tier):
+# backend/ha/load_monitor.py — 系统负载 + 租户等级 → 降级策略
+def get_tenant_degradation(self, tenant_tier: str) -> str:
     state = self.get_state()
-    if state == CRITICAL:
-        if tenant_tier == "enterprise": return "full"
-        if tenant_tier == "premium": return "skip_critique"
-        return "cache_only"
+    if state == SystemState.NORMAL:
+        return "full"
+    if state == SystemState.WARNING:
+        if tenant_tier in ("enterprise", "premium"):
+            return "full"
+        return "skip_critique"      # 免费用户 WARNING 就开始降级
+    if state == SystemState.CRITICAL:
+        if tenant_tier == "enterprise":
+            return "full"            # VIP 始终全链路
+        if tenant_tier == "premium":
+            return "skip_critique"
+        return "cache_only"          # 免费用户仅向量检索
+    return "full"
 ```
 
-企业版用户在系统高负载时仍享受全链路服务，免费版降级为仅缓存命中。
+**Orchestrator 集成（三个决策点）：**
+
+```python
+# backend/agent/orchestrator.py — 辅助函数解析租户等级
+def _get_tenant_degradation(state: dict) -> str:
+    tenant_id = (state.get("user_context") or {}).get("tenant_id", 0)
+    db = SessionLocal()
+    try:
+        rule = get_tenant_rule(db, tenant_id)
+        return get_load_monitor().get_tenant_degradation(rule.tier)
+    finally:
+        db.close()
+
+# 决策点 1: route_after_critique — skip_critique/cache_only 跳过自纠错
+degradation = _get_tenant_degradation(state)
+if degradation in ("skip_critique", "cache_only") and not critique_valid:
+    return "end"
+
+# 决策点 2: web_searcher_node — cache_only 跳过联网搜索
+if _get_tenant_degradation(state) == "cache_only":
+    skip_tavily_search()
+
+# 决策点 3: local_graph_search_node — cache_only 降级到纯向量
+if _get_tenant_degradation(state) == "cache_only":
+    fallback_to_retrieve_documents()
+```
+
+**降级矩阵：**
+
+| 系统负载 | Enterprise | Premium | Free |
+|---------|-----------|---------|------|
+| NORMAL | full | full | full |
+| WARNING | full | full | skip_critique |
+| CRITICAL | full | skip_critique | cache_only |
 
 ### 17.5 审计追踪
 
@@ -2629,7 +2671,7 @@ Critique：~1000 tokens（verification）
 4. **增量更新管线**：SHA-256 指纹跳过 + 图谱增量清理 + 异步队列，从全量重建到有变化才更新
 5. **多智能体编排**：LangGraph Supervisor-Workers，支持并行 fan-out 和条件路由
 6. **自纠错机制**：Planner + Critique + Replan，LLM 自省能力
-7. **自适应检索**：Query Profiler 意图分类 + 动态 RRF 权重 + 负载感知降级（v12）
+7. **自适应检索**：Query Profiler 意图分类 + 动态 RRF 权重 + SLA 分级降级（enterprise 全链路 → free cache_only，v12+v15）
 8. **全链路可观测**：OTel + Prometheus + Grafana，不是黑盒
 9. **自动化评测**：RAGAS + Golden Dataset + A/B 对比 + 图谱拓扑统计，用数据说话
 10. **生产级设计**：熔断、降级、重试、缓存、HITL、异步队列、全局负载监控，不是 toy project

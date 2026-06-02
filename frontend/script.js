@@ -31,14 +31,30 @@ createApp({
             isDragOver: false,
             sessionsLoading: false,
             skipAnimation: false,
-            showTrace: false
+            showTrace: false,
+            // Auth
+            authToken: localStorage.getItem('ragent-token') || '',
+            authUsername: localStorage.getItem('ragent-username') || '',
+            authMode: 'login',
+            authLoading: false,
+            authError: '',
+            authTenantName: '',
         };
     },
     mounted() {
         document.documentElement.setAttribute('data-theme', this.theme);
         this.configureMarked();
         this.setupCodeCopyListener();
-        this.loadSessions();
+        if (this.authToken) this.loadSessions();
+    },
+
+    // Auth helper: common fetch with Authorization header
+    _authFetch(url, options = {}) {
+        const headers = options.headers || {};
+        if (this.authToken) {
+            headers['Authorization'] = 'Bearer ' + this.authToken;
+        }
+        return fetch(url, { ...options, headers });
     },
     methods: {
         configureMarked() {
@@ -137,7 +153,7 @@ createApp({
             this.abortController = new AbortController();
 
             try {
-                const response = await fetch('/chat/stream', {
+                const response = await this._authFetch('/chat/stream', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ message: text, session_id: this.sessionId }),
@@ -311,6 +327,9 @@ createApp({
                     if (this.messages[botIdx].text && !this.messages[botIdx].text.includes('已终止')) {
                         this.messages[botIdx].text += '\n\n_(回答已被终止)_';
                     }
+                } else if (error.message && error.message.includes('401')) {
+                    this.messages[botIdx].text = '登录已过期，请重新登录';
+                    this.handleLogout();
                 } else {
                     console.error('Error:', error);
                     this.messages[botIdx].text = `抱歉，出了点问题：${error.message}`;
@@ -350,7 +369,7 @@ createApp({
         async refreshSessionList() {
             // 只刷新侧边栏会话列表，不加载最新会话的消息
             try {
-                const res = await fetch('/sessions');
+                const res = await this._authFetch('/sessions');
                 if (!res.ok) throw new Error('Failed');
                 const data = await res.json();
                 this.sessions = data.sessions;
@@ -362,7 +381,7 @@ createApp({
         async loadSessions() {
             this.sessionsLoading = true;
             try {
-                const res = await fetch('/sessions');
+                const res = await this._authFetch('/sessions');
                 if (!res.ok) throw new Error('Failed');
                 const data = await res.json();
                 this.sessions = data.sessions;
@@ -376,7 +395,7 @@ createApp({
         async loadSessionMessages(sessionId) {
             try {
                 this.skipAnimation = true;
-                const res = await fetch(`/sessions/${sessionId}`);
+                const res = await this._authFetch(`/sessions/${sessionId}`);
                 if (!res.ok) throw new Error('Failed');
                 const data = await res.json();
                 this.messages = data.messages.map(msg => ({
@@ -403,7 +422,7 @@ createApp({
             const ok = await this.showConfirm('确定要删除该会话吗？');
             if (!ok) return;
             try {
-                const res = await fetch(`/sessions/${sessionId}`, { method: 'DELETE' });
+                const res = await this._authFetch(`/sessions/${sessionId}`, { method: 'DELETE' });
                 const payload = await res.json().catch(() => ({}));
                 if (!res.ok) throw new Error(payload.detail || 'Delete failed');
                 this.sessions = this.sessions.filter(s => s.session_id !== sessionId);
@@ -426,7 +445,7 @@ createApp({
         async loadDocuments() {
             this.documentsLoading = true;
             try {
-                const res = await fetch('/documents');
+                const res = await this._authFetch('/documents');
                 if (!res.ok) throw new Error('Failed');
                 const data = await res.json();
                 this.documents = data.documents;
@@ -453,7 +472,7 @@ createApp({
             try {
                 const fd = new FormData();
                 fd.append('file', this.selectedFile);
-                const response = await fetch('/documents/upload', { method: 'POST', body: fd });
+                const response = await this._authFetch('/documents/upload', { method: 'POST', body: fd });
                 if (!response.ok) {
                     const e = await response.json().catch(() => ({}));
                     throw new Error(e.detail || 'Upload failed');
@@ -505,7 +524,7 @@ createApp({
             const ok = await this.showConfirm(`确定要删除文档 "${filename}" 吗？`);
             if (!ok) return;
             try {
-                const res = await fetch(`/documents/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+                const res = await this._authFetch(`/documents/${encodeURIComponent(filename)}`, { method: 'DELETE' });
                 if (!res.ok) { const e = await res.json(); throw new Error(e.detail || 'Delete failed'); }
                 await this.loadDocuments();
                 this.showToast('文档已删除', 'success');
@@ -533,6 +552,58 @@ createApp({
             localStorage.setItem('ragent-theme', this.theme);
             const meta = document.querySelector('meta[name="theme-color"]');
             if (meta) meta.content = this.theme === 'dark' ? '#1a1b1e' : '#3b82f6';
+        },
+
+        // Auth
+        async handleAuth() {
+            this.authLoading = true;
+            this.authError = '';
+            const endpoint = this.authMode === 'login' ? '/auth/token' : '/auth/register';
+            const isLogin = this.authMode === 'login';
+            try {
+                let body;
+                if (isLogin) {
+                    body = new URLSearchParams();
+                    body.append('username', this.authUsername);
+                    body.append('password', this.authPassword);
+                } else {
+                    body = JSON.stringify({
+                        username: this.authUsername,
+                        password: this.authPassword,
+                        tenant_name: this.authTenantName || this.authUsername + '_org',
+                        role: 'admin',
+                    });
+                }
+                const headers = { 'Content-Type': isLogin ? 'application/x-www-form-urlencoded' : 'application/json' };
+                const resp = await fetch(endpoint, { method: 'POST', headers, body: body.toString() });
+                const data = await resp.json();
+                if (!resp.ok) throw new Error(data.detail || 'Request failed');
+                if (isLogin) {
+                    this.authToken = data.access_token;
+                    this.authUsername = this.authUsername;
+                    localStorage.setItem('ragent-token', data.access_token);
+                    localStorage.setItem('ragent-username', this.authUsername);
+                    this.loadSessions();
+                    this.showToast('登录成功', 'success');
+                } else {
+                    this.authUsername = data.username || this.authUsername;
+                    this.showToast('注册成功，请登录', 'success');
+                    this.authMode = 'login';
+                }
+            } catch (e) {
+                this.authError = e.message;
+            } finally {
+                this.authLoading = false;
+            }
+        },
+        handleLogout() {
+            this.authToken = '';
+            this.authUsername = '';
+            localStorage.removeItem('ragent-token');
+            localStorage.removeItem('ragent-username');
+            this.messages = [];
+            this.sessions = [];
+            this.showToast('已退出登录', 'info');
         },
 
         // Toast
@@ -600,7 +671,7 @@ createApp({
                 const body = { session_id: this.sessionId, action: action };
                 if (action === 'modify') body.modified_input = this.hitlModifiedInput;
 
-                const resp = await fetch('/chat/hitl/resume', {
+                const resp = await this._authFetch('/chat/hitl/resume', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(body),

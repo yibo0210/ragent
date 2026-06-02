@@ -66,6 +66,35 @@ def _get_worker_model():
     return _worker_model
 
 
+def _get_tenant_degradation(state: dict) -> str:
+    """Get SLA-aware degradation level for current tenant.
+
+    Combines system load state with tenant SLA tier to determine
+    the degradation policy: full, skip_critique, or cache_only.
+    """
+    from backend.ha.load_monitor import get_load_monitor
+    from backend.billing.rate_limiter import get_tenant_rule
+
+    user_ctx = state.get("user_context", {}) or {}
+    tenant_id = user_ctx.get("tenant_id", 0)
+    monitor = get_load_monitor()
+
+    if not tenant_id:
+        return monitor.get_tenant_degradation("free")
+
+    try:
+        db = SessionLocal()
+        try:
+            rule = get_tenant_rule(db, tenant_id)
+            tier = rule.tier
+        finally:
+            db.close()
+    except Exception:
+        tier = "free"
+
+    return monitor.get_tenant_degradation(tier)
+
+
 # ---------------------------------------------------------------------------
 # 结构化输出 Schema
 # ---------------------------------------------------------------------------
@@ -461,11 +490,10 @@ def web_searcher_node(state: SupervisorState) -> dict:
     user_ctx = state.get("user_context", {}) or {}
     tenant_id = user_ctx.get("tenant_id")
 
-    # v12: CRITICAL 状态下跳过 Tavily 搜索
-    from backend.ha.load_monitor import get_load_monitor
-    monitor = get_load_monitor()
-    if monitor.should_circuit_break_tavily():
-        search_result = {"error": "CRITICAL 负载降级，跳过联网搜索", "results": []}
+    # v12: CRITICAL 状态下跳过 Tavily 搜索 (v15: SLA-aware)
+    degradation = _get_tenant_degradation(state)
+    if degradation == "cache_only":
+        search_result = {"error": "SLA 负载降级，跳过联网搜索", "results": []}
     else:
         # 执行联网搜索
         search_result = run_web_search(user_query)
@@ -732,14 +760,13 @@ def local_graph_search_node(state: SupervisorState) -> dict:
             "mode": "at_or_after",
         }
 
-    # v12: CRITICAL 状态下跳过图谱搜索，降级到纯向量
-    from backend.ha.load_monitor import get_load_monitor
-    monitor = get_load_monitor()
-    if monitor.should_circuit_break_neo4j():
-        emit_graph_step("⚡", "负载降级 — CRITICAL 状态，跳过 Neo4j 图谱搜索", agent="local_graph_search")
+    # v12: CRITICAL 状态下跳过图谱搜索，降级到纯向量 (v15: SLA-aware)
+    degradation = _get_tenant_degradation(state)
+    if degradation == "cache_only":
+        emit_graph_step("⚡", "SLA 负载降级 — 当前租户降级为纯向量检索", agent="local_graph_search")
         from backend.rag.utils import retrieve_documents
         result = retrieve_documents(user_query, top_k=5, tenant_id=tenant_id)
-        result["mode"] = "degraded_load_critical"
+        result["mode"] = "degraded_sla_cache_only"
     else:
         emit_graph_step("🔍", "局部图谱检索 — Milvus向量定位实体 → Neo4j 1-hop外扩邻居", agent="local_graph_search")
         with tracer.start_as_current_span("agent.local_graph_search") as span:
@@ -1030,14 +1057,13 @@ def replan_node(state: SupervisorState) -> dict:
 
 def route_after_critique(state: SupervisorState) -> str:
     """Critique 后的条件路由。"""
-    from backend.ha.load_monitor import get_load_monitor
     critique = state.get("critique_result", {})
     retry = state.get("retry_count", 0)
 
-    # v12: 高负载时跳过 Critique 重试，直接输出
-    monitor = get_load_monitor()
-    if monitor.should_skip_critique() and not critique.get("is_valid", True):
-        log.info("critique_skipped_due_to_load", state=monitor.get_state().value)
+    # v12: 高负载时跳过 Critique 重试 (v15: SLA-aware)
+    degradation = _get_tenant_degradation(state)
+    if degradation in ("skip_critique", "cache_only") and not critique.get("is_valid", True):
+        log.info("critique_skipped_sla_degraded", degradation=degradation)
         return "end"
 
     if critique.get("is_valid", True):

@@ -176,6 +176,15 @@ class MCPToolResult(BaseModel):
     is_error: bool = False
 
 
+class UserContextSchema(BaseModel):
+    """用户上下文信息，贯穿整个 agent graph。"""
+    user_id: int = 0
+    tenant_id: int = 0
+    tenant_name: str = ""
+    role: str = "viewer"
+    access_level: int = 1
+
+
 class QueryPlanStep(BaseModel):
     """Planner DAG 步骤。"""
     step_id: int

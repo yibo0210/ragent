@@ -91,14 +91,21 @@ async def delete_session(session_id: str):
 
 #普通问答 接收 ChatRequest（消息 + 会话 ID），调用 chat_with_agent 返回完整响应
 @router.post("/chat", response_model=ChatResponse)
-async def chat_endpoint(request: ChatRequest):
+async def chat_endpoint(request: ChatRequest, user: UserContext = Depends(get_current_user)):
     try:
         from backend.ha.load_monitor import get_load_monitor
         get_load_monitor().record_request()
         session_id = request.session_id or "default_session"
         if cache.is_locked(session_id):
             raise HTTPException(status_code=423, detail="会话处于人工审核等待中，请先完成审核操作")
-        resp = chat_with_agent(request.message, session_id)
+        user_context = {
+            "user_id": user.user_id,
+            "tenant_id": user.tenant_id,
+            "tenant_name": user.tenant_name,
+            "role": user.role,
+            "access_level": user.access_level,
+        }
+        resp = chat_with_agent(request.message, session_id, user_context=user_context)
         if isinstance(resp, dict):
             return ChatResponse(**resp)
         return ChatResponse(response=resp)
@@ -107,15 +114,22 @@ async def chat_endpoint(request: ChatRequest):
 
 #流式问答 以 SSE（服务器发送事件）返回流式响应，设置禁用缓存 / 长连接头，异常时返回 error 类型数据
 @router.post("/chat/stream")
-async def chat_stream_endpoint(request: ChatRequest):
+async def chat_stream_endpoint(request: ChatRequest, user: UserContext = Depends(get_current_user)):
     from backend.ha.load_monitor import get_load_monitor
     get_load_monitor().record_request()
     session_id = request.session_id or "default_session"
     if cache.is_locked(session_id):
         raise HTTPException(status_code=423, detail="会话处于人工审核等待中，请先完成审核操作")
+    user_context = {
+        "user_id": user.user_id,
+        "tenant_id": user.tenant_id,
+        "tenant_name": user.tenant_name,
+        "role": user.role,
+        "access_level": user.access_level,
+    }
     async def event_generator():
         try:
-            async for chunk in chat_with_agent_stream(request.message, session_id):
+            async for chunk in chat_with_agent_stream(request.message, session_id, user_context=user_context):
                 yield chunk
         except Exception as e:
             error_data = {"type": "error", "content": str(e)}

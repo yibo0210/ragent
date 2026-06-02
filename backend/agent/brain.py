@@ -278,7 +278,7 @@ def _prepare_messages(session_id: str, user_text: str) -> tuple[list, bool]:
 # ---------------------------------------------------------------------------
 # 非流式对话
 # ---------------------------------------------------------------------------
-def chat_with_agent(user_text: str, session_id: str = "default_session"):
+def chat_with_agent(user_text: str, session_id: str = "default_session", user_context: dict = None):
     """使用 Supervisor 多智能体处理用户消息并返回响应。"""
     # --- v6.0 语义缓存 ---
     try:
@@ -296,7 +296,7 @@ def chat_with_agent(user_text: str, session_id: str = "default_session"):
     # 调用 Supervisor 图
     graph = _get_supervisor_graph()
     result = graph.invoke(
-        {"messages": messages, "user_query": user_text},
+        {"messages": messages, "user_query": user_text, "user_context": user_context or {}},
         config={"configurable": {"thread_id": session_id}, "recursion_limit": 15},
     )
 
@@ -329,7 +329,7 @@ def chat_with_agent(user_text: str, session_id: str = "default_session"):
 # ---------------------------------------------------------------------------
 # 流式对话（SSE）
 # ---------------------------------------------------------------------------
-async def chat_with_agent_stream(user_text: str, session_id: str = "default_session"):
+async def chat_with_agent_stream(user_text: str, session_id: str = "default_session", user_context: dict = None):
     """使用 Supervisor 多智能体处理用户消息并流式返回响应。
 
     SSE 事件协议：
@@ -387,7 +387,7 @@ async def chat_with_agent_stream(user_text: str, session_id: str = "default_sess
         try:
             graph = _get_supervisor_graph()
             async for event in graph.astream(
-                {"messages": messages, "user_query": user_text},
+                {"messages": messages, "user_query": user_text, "user_context": user_context or {}},
                 stream_mode="updates",
                 config={"configurable": {"thread_id": session_id}, "recursion_limit": 15},
             ):

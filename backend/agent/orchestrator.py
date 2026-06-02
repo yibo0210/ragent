@@ -115,6 +115,8 @@ class SupervisorState(TypedDict):
     tool_outputs: dict                  # {step_id: output_data} MCP 调用结果
     # v12: Query 意图画像
     query_intent: Optional[dict]        # Profiler 输出的意图标签
+    # v14: 用户上下文（认证信息贯穿 agent graph）
+    user_context: Optional[dict]        # {user_id, tenant_id, tenant_name, role, access_level}
 
 
 # ---------------------------------------------------------------------------

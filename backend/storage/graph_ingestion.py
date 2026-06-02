@@ -3,7 +3,7 @@ from .graph_client import write_cypher
 
 
 def ingest_extraction_result(
-    entities: list, relations: list, l3_chunk_ids: list[str]
+    entities: list, relations: list, l3_chunk_ids: list[str], tenant_id: int = 0
 ) -> dict:
     """批量写入实体和关系到 Neo4j。"""
     stats = {"entities": 0, "relations": 0}
@@ -14,7 +14,7 @@ def ingest_extraction_result(
             vt = getattr(entity, "valid_to", "") or ""
             write_cypher(
                 """
-                MERGE (e:Entity {name: $name})
+                MERGE (e:Entity {name: $name, tenant_id: $tenant_id})
                 ON CREATE SET e.type = $type, e.description = $desc,
                     e.valid_from = $valid_from, e.valid_to = $valid_to
                 ON MATCH SET e.type = $type,
@@ -22,7 +22,7 @@ def ingest_extraction_result(
                     e.valid_from = CASE WHEN $valid_from <> '' THEN $valid_from ELSE e.valid_from END,
                     e.valid_to = CASE WHEN $valid_to <> '' THEN $valid_to ELSE e.valid_to END
                 """,
-                {"name": entity.name, "type": entity.type, "desc": entity.description,
+                {"name": entity.name, "tenant_id": tenant_id, "type": entity.type, "desc": entity.description,
                  "valid_from": vf, "valid_to": vt},
             )
             stats["entities"] += 1
@@ -33,16 +33,16 @@ def ingest_extraction_result(
         try:
             # 先确保目标实体存在（如果不存在则创建占位）
             write_cypher(
-                "MERGE (e:Entity {name: $name}) "
+                "MERGE (e:Entity {name: $name, tenant_id: $tenant_id}) "
                 "ON CREATE SET e.type = 'Concept', e.description = '' ",
-                {"name": rel.object},
+                {"name": rel.object, "tenant_id": tenant_id},
             )
             rvf = getattr(rel, "valid_from", "") or ""
             rvt = getattr(rel, "valid_to", "") or ""
             write_cypher(
                 """
-                MATCH (a:Entity {name: $subject})
-                MATCH (b:Entity {name: $object})
+                MATCH (a:Entity {name: $subject, tenant_id: $tenant_id})
+                MATCH (b:Entity {name: $object, tenant_id: $tenant_id})
                 MERGE (a)-[r:RELATES_TO {predicate: $predicate}]->(b)
                 ON CREATE SET r.description = $desc, r.weight = $weight,
                     r.source_chunks = $chunks,
@@ -58,6 +58,7 @@ def ingest_extraction_result(
                 {
                     "subject": rel.subject,
                     "object": rel.object,
+                    "tenant_id": tenant_id,
                     "predicate": rel.predicate,
                     "desc": rel.description,
                     "weight": rel.weight,

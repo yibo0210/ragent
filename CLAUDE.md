@@ -93,6 +93,8 @@ v13: 增量图聚类引擎 — 文档摄入后自动触发局部补丁（新节�
 
 **HITL**: LangGraph `interrupt()` (scenario A: low confidence RAG, scenario B: non-SELECT SQL). Redis lock → HTTP 423 during pending. Resume via `Command(resume=...)`.
 
+**Multi-Tenant RBAC** (v14): OAuth2/JWT 鉴权中间件提取 `tenant_id` + `user_id` + `role`。`SupervisorState.user_context` 透传给所有 Worker。Milvus pre-filtering (`expr = "tenant_id == X"`) 实现向量通道硬隔离。Neo4j MERGE key 扩展为 `{name, tenant_id}` + Cypher 子图约束实现图通道隔离。MySQL `tenant_id` FK 实现行级隔离。Data Analyst SQL 生成注入 tenant 约束 + `execute_sql` 安全检查双重防护。
+
 ### Key Files
 
 
@@ -153,6 +155,15 @@ v13: 增量图聚类引擎 — 文档摄入后自动触发局部补丁（新节�
 | `backend/ha/retry.py` | tenacity exponential backoff retry decorator |
 | `backend/ha/degradation.py` | Neo4j timeout → Dense+Sparse fallback |
 | `backend/ha/load_monitor.py` | Redis sliding-window QPS monitor + NORMAL/WARNING/CRITICAL state machine |
+| `backend/auth/__init__.py` | Auth package init |
+| `backend/auth/models.py` | Tenant, User, Role SQLAlchemy models |
+| `backend/auth/jwt_handler.py` | JWT encode/decode (PyJWT), password hash (passlib bcrypt) |
+| `backend/auth/dependencies.py` | UserContext dataclass, get_current_user FastAPI dependency |
+| `backend/auth/routes.py` | /auth/register, /auth/token endpoints |
+| `tests/test_privilege_escalation.py` | v14 integration tests: auth, tenant isolation, privilege escalation |
+| `tests/test_tenant_isolation_mysql.py` | MySQL tenant_id FK tests |
+| `tests/test_tenant_isolation_milvus.py` | Milvus tenant_id schema tests |
+| `tests/test_tenant_isolation_neo4j.py` | Neo4j tenant_id MERGE tests |
 | `backend/agent/query_profiler.py` | Lightweight intent classifier: keyword + embedding → L1/L2/L3 |
 | `backend/rag/dynamic_rrf.py` | Intent-driven RRF weight matrix (loads from config/weight_matrix.yaml) |
 | `config/weight_matrix.yaml` | RRF weight config: L1 Dense 70%, L2 Graph 65%, L3 balanced |
@@ -198,7 +209,7 @@ v13: 增量图聚类引擎 — 文档摄入后自动触发局部补丁（新节�
 - **DocumentIndex**: tracks filename-level version/state; `mark_document_deleted` bumps version and sets `is_deleted` on both ParentChunk and DocumentIndex
 - **RRF weights**: configurable via `RRF_WEIGHT_DENSE/SPARSE/GRAPH/VISUAL` env vars; `rrf_fusion_three_channel` supports 3 or 4 weights, grid-searchable via composite score
 - **Evaluation 3 modes**: `retrieval` (initial retrieval only), `pipeline` (full RAG pipeline), `e2e` (LLM generates answer + routing accuracy + latency)
-- **Golden dataset**: 80 QA pairs with `expected_agent` field for routing accuracy eval; 7 query types: conceptual, detail, cross_doc, global_summary, realtime, chat, data_query
+- **Golden dataset**: 84 QA pairs with `expected_agent` field for routing accuracy eval; 8 query types: conceptual, detail, cross_doc, global_summary, realtime, chat, data_query, privilege_escalation (v14)
 - **RAGAS 4 metrics**: context_precision, context_recall, faithfulness, answer_relevancy; composite = 0.4*prec + 0.3*faith + 0.3*rel. Uses ragas 0.2.15 (0.4.x incompatible with DashScope API format). `context_precision` and `faithfulness` work reliably; `answer_relevancy` and `context_recall` may return NaN due to DashScope prompt format rejection (400 error)
 - **Routing accuracy**: `evaluate_routing_accuracy()` calls Supervisor LLM directly (no Worker execution) and compares against `expected_agent`
 - **EvaluationResult handling**: ragas 0.2.x returns dict directly; code also handles 0.4.x `EvaluationResult` objects via `_scores_dict`/`to_pandas` fallback chain
@@ -237,6 +248,13 @@ v13: 增量图聚类引擎 — 文档摄入后自动触发局部补丁（新节�
 - **v13 Incremental clustering**: `patch_new_node(node_name)` checks 1-hop neighbors' community_id; if >60% share one community → direct assignment (zero cost); otherwise `recluster_subgraph(affected_communities)` extracts local subgraph and runs Louvain only on it. `incremental_cluster_after_ingest(filename)` orchestrates the full flow.
 - **v13 Dirty-flag summaries**: `CommunitySummary` MySQL table has `is_dirty` boolean. `mark_communities_dirty(cids)` sets flag on affected communities. `update_dirty_summaries()` scans dirty rows, regenerates only those, resets flag. Token savings 80-100%.
 - **v13 Redis Streams**: `StreamQueue` wraps XADD/XREADGROUP/XACK. Three streams (doc_ingest, graph_extract, vector_sync) with consumer groups. `ack_and_publish()` chains stages. Dead letter after 3 retries. Falls back to arq if Redis unavailable.
+- **v14 JWT auth**: `OAuth2PasswordBearer(tokenUrl="/auth/token")` + `get_current_user` dependency returns `UserContext` dataclass. PyJWT HS256 encoding, passlib bcrypt hashing. Token carries `user_id`, `tenant_id`, `tenant_name`, `role`, `access_level`.
+- **v14 Tenant isolation (MySQL)**: `tenant_id` FK with `server_default="1"` on DocumentIndex, ChatSession, ParentChunk, QueryCacheStore. Existing data gets tenant 1 automatically.
+- **v14 Tenant isolation (Milvus)**: `tenant_id` INT64 field in collection schema. `retrieve_documents(tenant_id=X)` appends `&& (tenant_id == X)` to `filter_expr`. Pre-filtering happens before ANN search — database-level enforcement.
+- **v14 Tenant isolation (Neo4j)**: Entity MERGE key changed from `{name}` to `{name, tenant_id}`. Cypher queries add `AND a.tenant_id = $tenant_id AND b.tenant_id = $tenant_id` dynamically. Backward compatible (None = no constraint).
+- **v14 user_context propagation**: `SupervisorState.user_context` dict flows from JWT → routes → brain → graph → all workers. Each worker extracts `tenant_id` from `state["user_context"]` and passes to retrieval functions.
+- **v14 Data Analyst SQL isolation**: `generate_sql(tenant_id=X)` injects tenant constraint into LLM prompt. `execute_sql` has defense-in-depth: blocks queries on tenant-scoped tables without `tenant_id` in SQL text.
+- **v14 Ingestion propagation**: `run_ingestion_task(tenant_id, access_level)` passes through to Milvus writer (per-doc dict), Neo4j ingestion, DocumentIndex upsert, and ParentChunk store.
 - **Checkpointer pending_writes**: `_load_writes` must return `(task_id, channel, value)` triples for LangGraph 0.2+ compatibility. Old format `(channel, value)` causes "not enough values to unpack (expected 3, got 2)".
 - **Milvus pymilvus 2.5 API**: `client.search()` uses `search_params` not `param`. Silent 0-result failure with old param name.
 - **Milvus gRPC reconnect**: `_ensure_connected()` calls `get_load_state()` before each query; resets client on failure to prevent "closed channel" errors.

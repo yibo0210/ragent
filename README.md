@@ -410,6 +410,21 @@ Neo4j Full Graph
 | **Three-Stage Consumer** | `backend/pipeline/stream_consumer.py` — stateless stage handlers for parsing, LLM extraction, and Neo4j/Milvus sync |
 | **Benchmark Script** | `scripts/benchmark_incremental.py` — full Louvain vs incremental comparison across graph scales (1K/5K/20K nodes) |
 
+### Multi-Tenant RBAC & Data Isolation (v14.0)
+
+| Feature | Description |
+|---------|-------------|
+| **JWT Authentication** | OAuth2 Bearer token auth via PyJWT + passlib bcrypt; `/auth/register` and `/auth/token` endpoints; `get_current_user` FastAPI dependency injects `UserContext` (tenant_id, role, access_level) into every request |
+| **Tenant/User/Role Models** | `backend/auth/models.py` — `Tenant`, `User`, `Role` SQLAlchemy tables with FK relationships; auto-created on startup via `init_db()` |
+| **MySQL Tenant Isolation** | `tenant_id` FK on `DocumentIndex`, `ChatSession`, `ParentChunk`, `QueryCacheStore`; `server_default="1"` for backward compatibility with existing data |
+| **Milvus Pre-filtering** | `tenant_id` field added to collection schema; `retrieve_documents()` dynamically appends `expr = "tenant_id == X"` to filter before ANN search — database-level enforcement, not application-level |
+| **Neo4j Subgraph Constraint** | Entity MERGE key extended to `{name, tenant_id}`; Cypher queries add `AND a.tenant_id = $tenant_id AND b.tenant_id = $tenant_id` for subgraph-scoped traversal |
+| **Ingestion Pipeline Propagation** | `tenant_id` and `access_level` flow through upload endpoint → arq/Redis Streams → `ingestion_worker` → Milvus writer, Neo4j ingestion, and DocumentIndex upsert |
+| **LangGraph State Extension** | `SupervisorState.user_context` dict carries tenant/role info through the entire agent graph; all worker nodes (RAG, Graph, Data Analyst) extract `tenant_id` for retrieval filtering |
+| **Data Analyst SQL Isolation** | LLM prompt injects `WHERE tenant_id = X` constraint; `execute_sql` defense-in-depth blocks queries on tenant-scoped tables without `tenant_id` filter |
+| **Session Scoping** | `list_session_infos()` filters by `tenant_id`; cache keys are tenant-specific to prevent cross-tenant session leakage |
+| **Privilege Escalation Tests** | 4 red-team test cases (SEC001-SEC004) in golden dataset; `evaluate_security()` function checks low-privilege users cannot access high-privilege content |
+
 ---
 
 ## Tech Stack
@@ -472,6 +487,10 @@ Neo4j Full Graph
 <td>Docker Compose (Milvus + etcd + MinIO + Attu + Neo4j + MySQL + Redis + Jaeger + Prometheus + Grafana + API + Worker) · GitHub Actions CI · Dockerfile</td>
 </tr>
 <tr>
+<td><strong>Auth & Multi-Tenancy</strong></td>
+<td>PyJWT · passlib[bcrypt] · FastAPI OAuth2 Depends · Tenant/User/Role models · Milvus pre-filtering · Neo4j subgraph constraint (v14.0)</td>
+</tr>
+<tr>
 <td><strong>Async Pipeline</strong></td>
 <td>arq (Redis-backed task queue) · Async ingestion worker · Sync fallback (v11.0)</td>
 </tr>
@@ -495,6 +514,12 @@ Ragent-AI/
 │   ├── api/
 │   │   ├── app.py              # FastAPI application factory, CORS, middleware
 │   │   └── routes.py           # REST API routes (chat, sessions, documents, HITL)
+│   ├── auth/                   # Multi-tenant RBAC (v14.0)
+│   │   ├── __init__.py
+│   │   ├── models.py           # Tenant, User, Role SQLAlchemy models
+│   │   ├── jwt_handler.py      # JWT encode/decode, password hashing
+│   │   ├── dependencies.py     # UserContext dataclass, get_current_user dependency
+│   │   └── routes.py           # /auth/register, /auth/token endpoints
 │   ├── agent/
 │   │   ├── brain.py            # Conversation storage, SSE streaming, HITL resume
 │   │   ├── orchestrator.py     # LangGraph graph: 6 agents + synthesize + planner + critique + replan (v8)
@@ -1012,6 +1037,20 @@ This will:
 - [x] Three-stage consumer: doc_ingest → graph_extract → vector_sync
 - [x] Benchmark script: full vs incremental time comparison + Token cost analysis
 - [x] 10 new unit tests for incremental clustering
+
+### v14.0 — Multi-Tenant RBAC & Data Isolation ✓
+
+- [x] Auth package: Tenant/User/Role SQLAlchemy models, JWT handler (PyJWT + passlib bcrypt), UserContext dependency
+- [x] Auth endpoints: `/auth/register` (create user + tenant), `/auth/token` (OAuth2 password grant)
+- [x] MySQL tenant_id: FK on DocumentIndex, ChatSession, ParentChunk, QueryCacheStore with server_default
+- [x] Milvus tenant_id: field added to collection schema; pre-filtering via `expr` in hybrid_retrieve
+- [x] Neo4j tenant_id: entity MERGE key extended to `{name, tenant_id}`; Cypher subgraph constraint
+- [x] Ingestion propagation: tenant_id flows through upload → arq/Redis Streams → worker → all stores
+- [x] SupervisorState.user_context: tenant/role info propagated through entire agent graph
+- [x] Data Analyst SQL isolation: LLM prompt constraint + execute_sql defense-in-depth check
+- [x] Session scoping: list_session_infos filters by tenant_id; tenant-specific cache keys
+- [x] Privilege escalation evaluation: 4 red-team test cases + evaluate_security function
+- [x] 47 tests passing (12 integration, 9 auth, 9 isolation, 13 evaluation, 4 fingerprint)
 
 ### v7.x — Planned
 

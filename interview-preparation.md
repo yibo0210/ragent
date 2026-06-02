@@ -20,18 +20,19 @@
 13. [文档处理与层次化切片](#13-文档处理与层次化切片)
 14. [HITL 人机协同](#14-hitl-人机协同)
 15. [自适应检索与负载降级 (v12)](#15-自适应检索与负载降级-v12)
-16. [常见面试问题与回答](#16-常见面试问题与回答)
-17. [代码级深度追问](#17-代码级深度追问高频追问准备)
-18. [实战调试场景](#18-实战调试场景behavioral-questions)
-19. [系统设计追问](#19-系统设计追问system-design)
-20. [高频概念追问](#20-高频概念追问)
-21. [LLM 基础原理](#21-llm-基础原理必考)
-22. [Agent 架构模式](#22-agent-架构模式高频)
-23. [Embedding 模型原理](#23-embedding-模型原理必考)
-24. [高级 RAG 模式](#24-高级-rag-模式高频)
-25. [生产工程](#25-生产工程实战)
-26. [安全与防护](#26-安全与防护生产必问)
-27. [面试技巧总结](#27-面试技巧总结)
+16. [多租户 RBAC 与数据隔离 (v14)](#16-多租户-rbac-与数据隔离-v14)
+17. [常见面试问题与回答](#17-常见面试问题与回答)
+18. [代码级深度追问](#18-代码级深度追问高频追问准备)
+19. [实战调试场景](#19-实战调试场景behavioral-questions)
+20. [系统设计追问](#20-系统设计追问system-design)
+21. [高频概念追问](#21-高频概念追问)
+22. [LLM 基础原理](#22-llm-基础原理必考)
+23. [Agent 架构模式](#23-agent-架构模式高频)
+24. [Embedding 模型原理](#24-embedding-模型原理必考)
+25. [高级 RAG 模式](#25-高级-rag-模式高频)
+26. [生产工程](#26-生产工程实战)
+27. [安全与防护](#27-安全与防护生产必问)
+28. [面试技巧总结](#28-面试技巧总结)
 
 ---
 
@@ -67,7 +68,7 @@ Ragent AI 通过以下方式解决：
 - 3 级 Query 意图分类（L1 事实 / L2 推理 / L3 总结）（v12）
 - 3 级系统负载状态（NORMAL / WARNING / CRITICAL）（v12）
 - 11 种本体实体类型，12 种关系谓词，70+ 条三元组规则（v10）
-- 80 条 Golden Dataset，7 种查询类型
+- 84 条 Golden Dataset（v14 新增 4 条权限越级攻击测试），8 种查询类型
 - 4 个 RAGAS 评测指标
 - 5 种评测模式（retrieval/pipeline/e2e/graph/graph_compare）
 - 10 个 Docker 服务一键拉起，含 API + Worker 双进程（v11）
@@ -1173,7 +1174,124 @@ class LoadMonitor:
 
 ---
 
-## 16. 常见面试问题与回答
+## 16. 多租户 RBAC 与数据隔离 (v14)
+
+### 16.1 问题背景
+
+v13 的系统是**单租户共享数据库**——所有用户共享同一个 Milvus Collection、同一个 Neo4j 图谱、同一个 MySQL 数据库。A 公司上传的文档 B 公司也能搜到，会话历史全局可见。
+
+企业级 SaaS 场景需要**行级/子图级数据隔离**：不同租户的数据物理隔离，即使 LLM "想"越权，数据库也会在底层拦截非法数据。
+
+### 16.2 四层改造
+
+**第一层：JWT 鉴权**
+
+```python
+# backend/auth/jwt_handler.py
+def encode_token(payload: dict) -> str:
+    # payload 包含 user_id, tenant_id, role, access_level
+    return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
+
+# backend/auth/dependencies.py
+def get_current_user(token: str = Depends(oauth2_scheme)) -> UserContext:
+    payload = decode_token(token)
+    return UserContext(
+        user_id=payload["user_id"],
+        tenant_id=payload["tenant_id"],
+        role=payload["role"],
+        access_level=payload["access_level"],
+    )
+```
+
+每个请求通过 `Depends(get_current_user)` 自动注入 `UserContext`，包含 `tenant_id`、`role`、`access_level`。
+
+**第二层：状态透传**
+
+```python
+# backend/agent/orchestrator.py
+class SupervisorState(TypedDict):
+    # ... 其他字段 ...
+    user_context: Optional[dict]  # {user_id, tenant_id, role, access_level}
+
+# 每个 Worker 节点提取 tenant_id
+def rag_specialist_node(state):
+    user_ctx = state.get("user_context", {})
+    tenant_id = user_ctx.get("tenant_id")
+    result = run_rag_graph(query, tenant_id=tenant_id)
+```
+
+**第三层：三路存储隔离**
+
+| 存储层 | 隔离机制 | 实现 |
+|--------|---------|------|
+| Milvus | Pre-filtering | `expr = "tenant_id == X"` 在 ANN 搜索前过滤 |
+| Neo4j | 子图约束 | `MERGE (e:Entity {name: $name, tenant_id: $tenant_id})` |
+| MySQL | 行级 FK | `tenant_id` 外键 + 查询自动过滤 |
+
+**第四层：评测验证**
+
+```python
+# 权限越级攻击测试
+{"id": "SEC001", "question": "机密并购计划是什么？", "test_role": "viewer", "expected_behavior": "refuse_or_empty"}
+```
+
+低权限用户提问高密级内容，预期 AI 回答"未找到相关信息"。
+
+### 16.3 Milvus Pre-filtering 实现
+
+```python
+# backend/rag/utils.py
+def retrieve_documents(query, top_k=5, tenant_id=None):
+    filter_expr = f"(chunk_level == {LEAF_LEVEL}) && (is_deleted != true)"
+    if tenant_id is not None:
+        filter_expr += f" && (tenant_id == {tenant_id})"
+    # Milvus 在 ANN 计算前就过滤掉非本租户的向量
+```
+
+**关键**：Pre-filtering 是在 ANN 搜索**之前**执行的，不是搜索后过滤。这意味着非本租户的向量根本不会参与相似度计算，数据库层面物理隔离。
+
+### 16.4 Neo4j 子图约束实现
+
+```python
+# backend/rag/graph_retriever.py
+def local_graph_search(query, tenant_id=None):
+    tenant_clause = ""
+    params = {"chunk_ids": chunk_ids}
+    if tenant_id is not None:
+        tenant_clause = "AND a.tenant_id = $tenant_id AND b.tenant_id = $tenant_id"
+        params["tenant_id"] = tenant_id
+
+    cypher = f"""
+    MATCH (a:Entity)-[r:RELATES_TO]->(b:Entity)
+    WHERE any(cid IN r.source_chunks WHERE cid IN $chunk_ids)
+    {tenant_clause}
+    RETURN a.name, r.predicate, b.name
+    """
+```
+
+实体 MERGE key 从 `{name}` 扩展为 `{name, tenant_id}`，不同租户的同名实体是不同节点。
+
+### 16.5 Data Analyst SQL 隔离
+
+双重防护：
+
+1. **LLM 提示词约束**：`generate_sql(tenant_id=X)` 在 prompt 中注入 "只查询 tenant_id = X 的数据"
+2. **execute_sql 安全检查**：如果 SQL 引用租户作用域表但没有 `tenant_id` 条件，直接拦截
+
+```python
+tenant_scoped_tables = ["chat_sessions", "chat_messages", "document_index", "parent_chunks"]
+for table in tenant_scoped_tables:
+    if table in sql_lower and "tenant_id" not in sql_lower:
+        return {"error": "SECURITY: Query must include tenant_id filter"}
+```
+
+### 16.6 面试话术
+
+> "v14 实现了端到端的多租户数据隔离。核心思路是'三层防护'：第一层是 JWT 鉴权，每个请求自动提取 tenant_id 和 role；第二层是状态透传，tenant_id 通过 LangGraph 的 SupervisorState 传递给所有 Worker；第三层是存储层硬隔离——Milvus 用 pre-filtering 在 ANN 搜索前过滤，Neo4j 用 MERGE key 扩展实现子图约束，MySQL 用 tenant_id 外键做行级隔离。即使 LLM 想越权，数据库也会在底层拦截。我还设计了权限越级攻击测试集，用低权限用户提问高密级内容，验证系统确实拒绝返回越权数据。"
+
+---
+
+## 17. 常见面试问题与回答
 
 ### Q1: 介绍一下你的项目？
 
@@ -1262,7 +1380,7 @@ Milvus 原生支持稠密+稀疏双通道检索：
 
 **回答**：
 基于 RAGAS 框架，4 个指标：context_precision、context_recall、faithfulness、answer_relevancy。
-- Golden Dataset：80 条 QA 对，7 种查询类型
+- Golden Dataset：84 条 QA 对，8 种查询类型（含权限越级攻击测试）
 - 三种评测模式：retrieval（仅检索）、pipeline（完整 RAG）、e2e（端到端）
 - A/B 对比：调参前后两次评测结果 diff
 - 路由准确率：Supervisor 路由 vs expected_agent 对比
@@ -1355,6 +1473,34 @@ Milvus 原生支持稠密+稀疏双通道检索：
 **面试话术**：
 > "简单查询的端到端延迟从 48 秒优化到 13 秒，核心做了三件事：第一，Query Profiler 的 12 个原型 Embedding 从 3 次 API 调用合并为 1 次，并在应用启动时预热，不在请求路径上阻塞；第二，L1 事实类查询（score<0.3）直接跳过 Supervisor LLM 路由，省掉 28 秒的大模型调用；第三，direct_answer 节点改用 qwen-turbo 轻量模型，推理时间从 15 秒降到 5 秒。三个优化叠加，延迟降低 73%。"
 
+### Q12.8: v14 的多租户隔离是怎么设计的？
+
+**回答**：
+
+**问题背景**：v13 是单租户系统——所有用户共享同一个 Milvus Collection、Neo4j 图谱、MySQL 数据库。A 公司的文档 B 公司也能搜到，会话历史全局可见。企业 SaaS 场景需要行级/子图级数据隔离。
+
+**四层改造**：
+
+1. **JWT 鉴权层**：`OAuth2PasswordBearer` + `get_current_user` 依赖注入，每个请求自动提取 `UserContext`（user_id, tenant_id, role, access_level）。Token 用 PyJWT HS256 编码，passlib bcrypt 哈希密码。
+
+2. **状态透传层**：`SupervisorState` 新增 `user_context` 字段，从 JWT → routes → brain → graph → 所有 Worker 全链路透传。每个 Worker 节点提取 `tenant_id` 传递给检索函数。
+
+3. **存储隔离层**：
+   - Milvus：`tenant_id` INT64 字段 + pre-filtering（`expr = "tenant_id == X"`），在 ANN 搜索前物理过滤
+   - Neo4j：MERGE key 从 `{name}` 扩展为 `{name, tenant_id}`，Cypher 查询加 `AND a.tenant_id = $tenant_id`
+   - MySQL：`tenant_id` FK + `server_default="1"`，查询自动过滤
+
+4. **评测验证层**：4 条权限越级攻击测试（SEC001-SEC004），低权限用户提问高密级内容，验证系统拒绝返回越权数据。
+
+**关键设计决策**：
+- Milvus 用 pre-filtering 而非 post-filtering，确保非租户向量不参与相似度计算
+- Neo4j 实体 MERGE key 包含 tenant_id，不同租户的同名实体是不同节点
+- Data Analyst SQL 生成有双重防护：LLM 提示词约束 + execute_sql 安全检查
+- `server_default="1"` 确保现有数据自动归属默认租户，无需数据迁移
+
+**面试话术**：
+> "v14 实现了端到端的多租户数据隔离。核心思路是'三层硬隔离'：Milvus 用 pre-filtering 在 ANN 搜索前过滤，Neo4j 用 MERGE key 扩展实现子图约束，MySQL 用 tenant_id 外键做行级隔离。即使 LLM 想越权，数据库也会在底层拦截。我还设计了红蓝对抗测试集，用低权限用户提问高密级内容，验证隔离无懈可击。"
+
 ### Q13: 如果让你优化这个系统，你会怎么做？
 
 **回答**（参考计划文档）：
@@ -1393,7 +1539,7 @@ RAG = Retrieval Augmented Generation，检索增强生成。核心思想是**让
 
 ---
 
-## 17. 代码级深度追问（高频追问准备）
+## 18. 代码级深度追问（高频追问准备）
 
 ### Q16: Supervisor 的 JSON 解析是怎么做的？为什么不用 with_structured_output？
 
@@ -1695,7 +1841,7 @@ graph.add_edge("data_analyst", END)   # 跳过 critique
 
 ---
 
-## 18. 实战调试场景（Behavioral Questions）
+## 19. 实战调试场景（Behavioral Questions）
 
 ### Q24: 如果用户反馈"回答不准确"，你怎么排查？
 
@@ -1768,7 +1914,7 @@ graph.add_edge("data_analyst", END)   # 跳过 critique
 
 ---
 
-## 19. 系统设计追问（System Design）
+## 20. 系统设计追问（System Design）
 
 ### Q27: 如果让你重新设计这个系统，你会做什么不同的决定？
 
@@ -1811,7 +1957,7 @@ graph.add_edge("data_analyst", END)   # 跳过 critique
 
 ---
 
-## 20. 高频概念追问
+## 21. 高频概念追问
 
 ### Q30: RRF 和 BM25 的区别？
 
@@ -1887,7 +2033,7 @@ log.info("user_logged_in", user_id=123)
 
 ---
 
-## 21. LLM 基础原理（必考）
+## 22. LLM 基础原理（必考）
 
 ### Q35: Transformer 的核心机制是什么？
 
@@ -1977,7 +2123,7 @@ CoT Prompt：Q: 8+5×2=? A: 先算乘法 5×2=10，再算加法 8+10=18
 
 ---
 
-## 22. Agent 架构模式（高频）
+## 23. Agent 架构模式（高频）
 
 ### Q39: ReAct 模式是什么？你的系统和它有什么关系？
 
@@ -2092,7 +2238,7 @@ LangGraph 的 StateGraph 保证每个节点的执行是原子性的——一个�
 
 ---
 
-## 23. Embedding 模型原理（必考）
+## 24. Embedding 模型原理（必考）
 
 ### Q43: Embedding 模型是怎么训练的？
 
@@ -2152,7 +2298,7 @@ sparse_embedding = embedding_service.get_sparse_embedding(query)  # BM25
 
 ---
 
-## 24. 高级 RAG 模式（高频）
+## 25. 高级 RAG 模式（高频）
 
 ### Q46: Corrective RAG (CRAG) 是什么？你的系统有类似机制吗？
 
@@ -2230,7 +2376,7 @@ Adaptive RAG 根据查询特征动态调整检索策略：
 
 ---
 
-## 25. 生产工程（实战）
+## 26. 生产工程（实战）
 
 ### Q50: 如何控制 LLM API 成本？
 
@@ -2313,7 +2459,7 @@ Critique：~1000 tokens（verification）
 
 ---
 
-## 26. 安全与防护（生产必问）
+## 27. 安全与防护（生产必问）
 
 ### Q53: 如何防止 Agent 执行危险操作？
 
@@ -2365,7 +2511,7 @@ Critique：~1000 tokens（verification）
 
 ---
 
-## 27. 面试技巧总结
+## 28. 面试技巧总结
 
 ### 回答问题的 STAR 框架
 
@@ -2407,3 +2553,5 @@ Critique：~1000 tokens（verification）
 12. **增量图聚类**：局部补丁 + 子图重构替代全量 Louvain，5K 节点加速 109x（v13）
 13. **脏位驱动摘要**：is_dirty 标记 + 定向 LLM 调用，Token 成本降 90%+（v13）
 14. **Redis Streams 管线**：三阶段消费者组 + 死信处理，替代 arq 单队列（v13）
+15. **多租户 RBAC**：JWT 鉴权 + Milvus pre-filtering + Neo4j 子图约束 + MySQL 行级隔离（v14）
+16. **权限越级评测**：红蓝对抗测试集 + evaluate_security 函数，验证隔离无懈可击（v14）

@@ -20,6 +20,8 @@ import re
 
 from dotenv import load_dotenv
 from backend.observability import get_tracer, get_logger, Metrics
+from backend.billing.token_tracker import record_token_usage
+from backend.storage.database import SessionLocal
 
 tracer = get_tracer("ragent.agent")
 log = get_logger("ragent.agent")
@@ -398,6 +400,22 @@ def rag_specialist_node(state: SupervisorState) -> dict:
 
     answer = _stream_answer(model, [HumanMessage(content=prompt)])
 
+    # Record token usage
+    _db = SessionLocal()
+    try:
+        record_token_usage(
+            db=_db,
+            tenant_id=user_ctx.get("tenant_id", 0),
+            user_id=user_ctx.get("user_id", 0),
+            model_name=os.getenv("MODEL", "qwen-plus"),
+            prompt_tokens=0,  # Will be populated if model returns usage
+            completion_tokens=0,
+            agent_name="rag_specialist",
+            request_type="chat",
+        )
+    finally:
+        _db.close()
+
     # 更新 agent_trace
     agent_trace = state.get("agent_trace") or {}
     agent_trace["rag_trace"] = rag_trace
@@ -627,6 +645,23 @@ def direct_answer_node(state: SupervisorState) -> dict:
     prompt_messages = [SystemMessage(content=DIRECT_ANSWER_PROMPT)] + list(recent_messages)
 
     answer = _stream_answer(model, prompt_messages)
+
+    # Record token usage
+    _db = SessionLocal()
+    try:
+        user_ctx = state.get("user_context", {}) or {}
+        record_token_usage(
+            db=_db,
+            tenant_id=user_ctx.get("tenant_id", 0),
+            user_id=user_ctx.get("user_id", 0),
+            model_name=os.getenv("SUPERVISOR_MODEL", os.getenv("MODEL", "qwen-turbo")),
+            prompt_tokens=0,  # Will be populated if model returns usage
+            completion_tokens=0,
+            agent_name="direct_answer",
+            request_type="chat",
+        )
+    finally:
+        _db.close()
 
     # 更新 agent_trace（透传 supervisor 的路由信息）
     agent_trace = state.get("agent_trace") or {}

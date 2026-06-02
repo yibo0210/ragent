@@ -55,3 +55,34 @@ def test_token_usage_tenant_filter(db_session):
     t1_logs = db_session.query(TokenUsageLog).filter(TokenUsageLog.tenant_id == 1).all()
     assert len(t1_logs) == 1
     assert t1_logs[0].prompt_tokens == 100
+
+
+from backend.billing.token_tracker import record_token_usage, get_usage_summary
+from unittest.mock import MagicMock
+
+
+def test_record_token_usage():
+    mock_db = MagicMock()
+    record_token_usage(
+        db=mock_db, tenant_id=1, user_id=1, session_id="s1",
+        model_name="qwen-plus", prompt_tokens=500, completion_tokens=200,
+        agent_name="rag_specialist", request_type="chat",
+    )
+    mock_db.add.assert_called_once()
+    mock_db.commit.assert_called_once()
+
+
+def test_get_usage_summary():
+    mock_db = MagicMock()
+    mock_query = MagicMock()
+    mock_db.query.return_value = mock_query
+    mock_query.filter.return_value = mock_query
+    mock_query.all.return_value = [
+        MagicMock(prompt_tokens=100, completion_tokens=50),
+        MagicMock(prompt_tokens=200, completion_tokens=100),
+    ]
+    result = get_usage_summary(mock_db, tenant_id=1)
+    assert result["total_prompt_tokens"] == 300
+    assert result["total_completion_tokens"] == 150
+    assert result["total_tokens"] == 450
+    assert result["request_count"] == 2

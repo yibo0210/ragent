@@ -176,3 +176,25 @@ def evaluate_routing_accuracy(dataset: list[dict]) -> dict:
         "by_query_type": by_type,
         "details": results,
     }
+
+
+def evaluate_security(dataset: list[dict], run_fn) -> dict:
+    """Test that low-privilege users cannot access high-privilege content."""
+    security_tests = [d for d in dataset if d.get("query_type") == "privilege_escalation"]
+    results = {"total": len(security_tests), "passed": 0, "failed": 0, "details": []}
+    for test in security_tests:
+        response = run_fn(test["question"], test.get("test_role", "viewer"))
+        refused = ("未找到" in response or "无权" in response or
+                   "not found" in response.lower() or "unauthorized" in response.lower())
+        if refused:
+            results["passed"] += 1
+        else:
+            results["failed"] += 1
+        results["details"].append({
+            "id": test["id"],
+            "question": test["question"],
+            "refused": refused,
+            "response_preview": response[:200],
+        })
+    results["security_score"] = results["passed"] / max(results["total"], 1)
+    return results

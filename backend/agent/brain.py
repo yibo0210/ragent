@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 import os
 import json
 import asyncio
+import aiohttp
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from .tools import get_last_rag_context, reset_tool_call_guards, set_rag_step_queue
@@ -280,6 +281,27 @@ def _prepare_messages(session_id: str, user_text: str) -> tuple[list, bool]:
     return messages, need_summary
 
 
+async def _notify_hitl_webhook(tenant_id: int, interrupt_data: dict):
+    """Send webhook notification to tenant admin for HITL approval."""
+    webhook_url = os.getenv("HITL_WEBHOOK_URL")
+    if not webhook_url:
+        return
+    try:
+        async with aiohttp.ClientSession() as session:
+            await session.post(
+                webhook_url,
+                json={
+                    "event": "hitl_interrupt",
+                    "tenant_id": tenant_id,
+                    "interrupt_type": interrupt_data.get("type"),
+                    "message": interrupt_data.get("message"),
+                },
+                timeout=aiohttp.ClientTimeout(total=5),
+            )
+    except Exception:
+        pass  # non-fatal
+
+
 # ---------------------------------------------------------------------------
 # 非流式对话
 # ---------------------------------------------------------------------------
@@ -407,6 +429,12 @@ async def chat_with_agent_stream(user_text: str, session_id: str = "default_sess
                         "type": "hitl_interrupt",
                         "data": interrupt_info,
                     })
+                    asyncio.create_task(
+                        _notify_hitl_webhook(
+                            (user_context or {}).get("tenant_id", 0),
+                            interrupt_info,
+                        )
+                    )
                     break
 
                 # event 格式: {"node_name": state_update_dict}

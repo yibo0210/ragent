@@ -50,6 +50,16 @@ def create_app() -> FastAPI:
             response.headers["Expires"] = "0"
         return response
 
+    # --- v15 Rate-limit middleware ---
+    try:
+        from backend.billing.rate_limiter import TenantRateLimiter
+        from backend.billing.middleware import create_rate_limit_middleware
+        from backend.storage.cache import cache
+        _limiter = TenantRateLimiter(cache._get_client())
+        app.middleware("http")(create_rate_limit_middleware(_limiter))
+    except Exception:
+        pass  # Redis may not be available
+
     app.include_router(router)
 
     # --- v14 Auth routes ---

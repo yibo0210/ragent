@@ -85,6 +85,23 @@ class LoadMonitor:
         """CRITICAL 状态时熔断 Tavily Web 搜索。"""
         return self.get_state() == SystemState.CRITICAL
 
+    def get_tenant_degradation(self, tenant_tier: str) -> str:
+        """Return degradation level based on system load and tenant tier."""
+        state = self.get_state()
+        if state == SystemState.NORMAL:
+            return "full"
+        if state == SystemState.WARNING:
+            if tenant_tier in ("enterprise", "premium"):
+                return "full"
+            return "skip_critique"
+        if state == SystemState.CRITICAL:
+            if tenant_tier == "enterprise":
+                return "full"
+            if tenant_tier == "premium":
+                return "skip_critique"
+            return "cache_only"
+        return "full"
+
     def get_stats(self) -> dict:
         """返回当前监控统计信息。"""
         state = self.get_state()

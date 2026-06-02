@@ -34,8 +34,8 @@ class ConversationStorage:
         return f"chat_messages:{session_id}"
 
     @staticmethod
-    def _sessions_cache_key() -> str:
-        return f"chat_sessions:anonymous"
+    def _sessions_cache_key(tenant_id: int = None) -> str:
+        return f"chat_sessions:{tenant_id or 'anonymous'}"
 
     @staticmethod
     def _to_langchain_messages(records: list[dict]) -> list:
@@ -51,7 +51,7 @@ class ConversationStorage:
                 messages.append(SystemMessage(content=content))
         return messages
 
-    def save(self, session_id: str, messages: list, metadata: dict = None, extra_message_data: list = None):
+    def save(self, session_id: str, messages: list, metadata: dict = None, extra_message_data: list = None, tenant_id: int = None):
         """保存对话"""
         db = SessionLocal()
         try:
@@ -61,11 +61,16 @@ class ConversationStorage:
                 .first()
             )
             if not session:
-                session = ChatSession(session_id=session_id, metadata_json=metadata or {})
+                create_kwargs = {"session_id": session_id, "metadata_json": metadata or {}}
+                if tenant_id is not None:
+                    create_kwargs["tenant_id"] = tenant_id
+                session = ChatSession(**create_kwargs)
                 db.add(session)
                 db.flush()
             else:
                 session.metadata_json = metadata or {}
+                if tenant_id is not None:
+                    session.tenant_id = tenant_id
 
             db.query(ChatMessage).filter(ChatMessage.session_ref_id == session.id).delete(synchronize_session=False)
 
@@ -103,7 +108,7 @@ class ConversationStorage:
             db.commit()
 
             cache.set_json(self._messages_cache_key(session_id), serialized)
-            cache.delete(self._sessions_cache_key())
+            cache.delete(self._sessions_cache_key(tenant_id))
         finally:
             db.close()
 
@@ -121,18 +126,17 @@ class ConversationStorage:
         """列出所有会话"""
         return [item["session_id"] for item in self.list_session_infos()]
 
-    def list_session_infos(self) -> list[dict]:
-        cached = cache.get_json(self._sessions_cache_key())
+    def list_session_infos(self, tenant_id: int = None) -> list[dict]:
+        cached = cache.get_json(self._sessions_cache_key(tenant_id))
         if cached is not None:
             return cached
 
         db = SessionLocal()
         try:
-            sessions = (
-                db.query(ChatSession)
-                .order_by(ChatSession.updated_at.desc())
-                .all()
-            )
+            query = db.query(ChatSession)
+            if tenant_id is not None:
+                query = query.filter(ChatSession.tenant_id == tenant_id)
+            sessions = query.order_by(ChatSession.updated_at.desc()).all()
             result = []
             for s in sessions:
                 count = db.query(ChatMessage).filter(ChatMessage.session_ref_id == s.id).count()
@@ -150,7 +154,7 @@ class ConversationStorage:
                         "first_message": first_msg.content[:20] if first_msg else "",
                     }
                 )
-            cache.set_json(self._sessions_cache_key(), result)
+            cache.set_json(self._sessions_cache_key(tenant_id), result)
             return result
         finally:
             db.close()
@@ -203,10 +207,11 @@ class ConversationStorage:
             if not session:
                 return False
 
+            tenant_id = session.tenant_id
             db.delete(session)
             db.commit()
             cache.delete(self._messages_cache_key(session_id))
-            cache.delete(self._sessions_cache_key())
+            cache.delete(self._sessions_cache_key(tenant_id))
             return True
         finally:
             db.close()

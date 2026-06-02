@@ -68,11 +68,11 @@ async def get_session_messages(session_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-#列出所有会话 按更新时间倒序返回会话列表
+#列出所有会话 按更新时间倒序返回会话列表（按租户隔离）
 @router.get("/sessions", response_model=SessionListResponse)
-async def list_sessions():
+async def list_sessions(user: UserContext = Depends(get_current_user)):
     try:
-        sessions = [SessionInfo(**item) for item in storage.list_session_infos()]
+        sessions = [SessionInfo(**item) for item in storage.list_session_infos(tenant_id=user.tenant_id)]
         sessions.sort(key=lambda x: x.updated_at, reverse=True)
         return SessionListResponse(sessions=sessions)
     except Exception as e:

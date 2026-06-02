@@ -146,13 +146,16 @@ def _fallback_schema() -> str:
 """
 
 
-def generate_sql(question: str, schema: str) -> str:
+def generate_sql(question: str, schema: str, tenant_id: int = None) -> str:
     """调用 LLM 将自然语言转换为 SQL。"""
     import traceback
     from .orchestrator import _get_worker_model
 
     model = _get_worker_model()
-    prompt = SQL_GENERATION_PROMPT.format(schema=schema, question=question)
+    extra_constraint = ""
+    if tenant_id is not None:
+        extra_constraint = f"\nIMPORTANT: Only query rows where tenant_id = {tenant_id}. Always add 'WHERE tenant_id = {tenant_id}' (or 'AND tenant_id = {tenant_id}' if there's already a WHERE clause) to every SELECT statement that queries tables with a tenant_id column."
+    prompt = SQL_GENERATION_PROMPT.format(schema=schema, question=question) + extra_constraint
     try:
         response = model.invoke([HumanMessage(content=prompt)])
         content = response.content if hasattr(response, "content") else str(response)
@@ -180,6 +183,13 @@ def execute_sql(sql: str) -> dict:
             "sql": cleaned,
             "message": "仅允许执行 SELECT 查询",
         }
+
+    # Defense-in-depth: verify tenant_id constraint is present for tenant-scoped tables
+    tenant_scoped_tables = ["chat_sessions", "chat_messages", "document_index", "parent_chunks"]
+    sql_lower = cleaned.lower()
+    for table in tenant_scoped_tables:
+        if table in sql_lower and "tenant_id" not in sql_lower:
+            return {"error": sql, "message": f"SECURITY: Query on {table} must include tenant_id filter"}
 
     db = SessionLocal()
     try:

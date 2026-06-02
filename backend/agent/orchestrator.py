@@ -528,12 +528,16 @@ def data_analyst_node(state: SupervisorState) -> dict:
     except Exception:
         pass
 
+    # v14: 提取 tenant_id 用于 SQL 租户隔离
+    user_ctx = state.get("user_context", {}) or {}
+    tenant_id = user_ctx.get("tenant_id")
+
     # 本地 MySQL 查询
     emit_rag_step("📊", "Schema 发现 — Data Analyst 读取MySQL数据库表结构", agent="data_analyst")
     schema = get_schema_info()
 
     emit_rag_step("🔍", "Text-to-SQL — LLM 将自然语言转为SQL查询语句", agent="data_analyst")
-    sql = generate_sql(user_query, schema)
+    sql = generate_sql(user_query, schema, tenant_id=tenant_id)
     emit_rag_step("📝", f"生成SQL — {sql[:100]}", agent="data_analyst")
 
     result = execute_sql(sql)

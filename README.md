@@ -437,6 +437,14 @@ Neo4j Full Graph
 | **Audit Context Manager** | `AuditContext` wraps operations with before/after semantics; automatically logs exceptions as `risk_level="high"` |
 | **Billing API** | `GET /billing/usage` returns token consumption summary; `GET /billing/audit` returns paginated audit logs with action filter — both tenant-scoped |
 | **HITL Webhook** | `HITL_WEBHOOK_URL` env var triggers POST notification to tenant admin on interrupt events; non-blocking `asyncio.create_task`, 5s timeout |
+| **Frontend Auth** | Login/register UI with JWT token persistence in `localStorage`; `_authFetch()` wrapper injects `Authorization: Bearer` on all API calls; auto-logout on 401 |
+| **Config Validation** | `backend/config.py` — Pydantic `BaseSettings` validates all env vars at startup; no hardcoded fallback secrets (missing JWT_SECRET or DATABASE_URL → fatal error) |
+| **SQL Execution Safety** | Four-layer defense: SELECT-only guard, multi-statement `;` rejection, `SET TRANSACTION READ ONLY`, tenant-scoped table `tenant_id` filter enforcement |
+| **Upload Validation** | File size capped at configurable `UPLOAD_MAX_SIZE_MB` (default 50MB); oversized uploads rejected with 400 before disk I/O |
+| **Database Migrations** | Alembic initialized at `alembic/` — schema changes via `alembic revision --autogenerate` + `alembic upgrade head` |
+| **OTel OTLP Support** | Tracing auto-detects `OTEL_EXPORTER_OTLP_ENDPOINT` — uses gRPC `OTLPSpanExporter` in production, `ConsoleSpanExporter` in development |
+| **Session List Optimization** | Batch queries (`GROUP BY` + `func.count`/`func.min`) instead of N+1 per-session fetches |
+| **Test Coverage** | 65 tests covering auth, billing, rate limiting, audit, load monitor, data analyst SQL safety, SLA degradation |
 
 ---
 

@@ -2685,3 +2685,10 @@ Critique：~1000 tokens（verification）
 18. **Per-Tenant 限流**：Redis 滑动窗口 QPS 控制 + SLA 分级降级（enterprise/full, free/cache_only）（v15）
 19. **不可篡改审计**：MCP 工具调用 + SQL 执行 + HITL 事件全量审计，risk_level 自动分类（v15）
 20. **HITL Webhook**：中断事件实时通知租户管理员，支持审批流集成（v15）
+21. **SQL 执行安全**：四层防护（SELECT 检查 + 多语句拦截 + READ ONLY 事务 + tenant_id 强制过滤），防止 SQL 注入和越权查询
+22. **配置校验**：Pydantic BaseSettings 启动时一次性校验所有 env var，无硬编码密钥（缺失 JWT_SECRET → 启动失败）
+23. **错误可观测性**：全链路 15 处 `except:pass` 替换为结构化日志告警，Redis 降级、限流失效、缓存失败全量可追踪
+24. **Session 查询优化**：N+1 问题修复 → 3 次批量 GROUP BY 查询，100+ 会话时延迟从线性降为常数
+25. **前端认证**：登录/注册 UI + localStorage JWT 持久化 + `_authFetch()` 统一注入 + 401 自动登出
+26. **数据库迁移**：Alembic 初始化，schema 变更走 `revision --autogenerate` → `upgrade head`，告别手动 DDL
+27. **端到端测试**：65 个测试覆盖 auth、billing、rate limiting、audit、load monitor、data analyst SQL 安全、SLA 降级

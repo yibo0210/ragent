@@ -129,8 +129,10 @@ v13: 增量图聚类引擎 — 文档摄入后自动触发局部补丁（新节�
 | `backend/storage/doc_lifecycle.py` | Document lifecycle: soft-delete, chunk ID query, DocumentIndex upsert (hash/version) |
 | `backend/storage/graph_schema.py` | Neo4j constraints and indexes |
 | `backend/storage/models.py` | ORM: sessions, messages, chunks, CommunitySummary, DocumentIndex, QueryCacheStore, checkpoints |
-| `backend/storage/database.py` | SQLAlchemy engine + session factory |
+| `backend/config.py` | Pydantic BaseSettings — centralized env validation, no hardcoded fallback secrets |
+| `backend/storage/database.py` | SQLAlchemy engine + session factory (pool_size=10, max_overflow=20) |
 | `backend/storage/checkpointer.py` | LangGraph MySQL checkpointer for state persistence |
+| `alembic/` | Database migration tooling (alembic revision --autogenerate) |
 | `backend/storage/cache.py` | Redis wrapper: get/set/lock/json |
 | `backend/storage/parent_chunk_store.py` | MySQL parent chunk (L1/L2) store for auto-merge |
 | `backend/graph/community.py` | Leiden clustering, summaries, Milvus indexing |
@@ -278,6 +280,14 @@ v13: 增量图聚类引擎 — 文档摄入后自动触发局部补丁（新节�
 - **Document listing**: `GET /documents` now queries MySQL `document_index` via `list_active_documents(tenant_id)` for tenant isolation, not raw Milvus.
 - **Document delete isolation**: `mark_document_deleted(filename, tenant_id)` filters `DocumentIndex` by tenant_id — cross-tenant delete returns 404.
 - **Session persistence**: `storage.save(..., tenant_id=...)` is mandatory — sessions without tenant_id are invisible to `list_session_infos(tenant_id)`. `delete_session(session_id, tenant_id)` also filters by tenant_id.
+- **Session listing optimization**: `list_session_infos` uses single-pass batch queries (`GROUP BY`, `func.count`, `func.min`) instead of N+1 per-session fetches — 3 queries total regardless of session count.
+- **Config management**: `backend/config.py` — Pydantic `BaseSettings` loads from `.env` with `extra="ignore"`; `get_settings()` singleton. No hardcoded fallback secrets — JWT_SECRET, DATABASE_URL raise `RuntimeError` if unset.
+- **Error handling**: all `except Exception: pass` replaced with `log.warning("operation_failed", error=str(e))`; rate-limiter fail-open and SSE queue close are intentional but documented with inline comments.
+- **SQL execution safety**: `data_analyst.execute_sql` has four-layer defense: (1) `startswith("SELECT")` check, (2) multi-statement `;` rejection, (3) `SET TRANSACTION READ ONLY`, (4) tenant-scoped table `tenant_id` filter enforcement.
+- **Upload validation**: file size capped at `upload_max_size_mb` (default 50MB) via `backend/config.py`; oversized uploads rejected with 400 before processing.
+- **Alembic migrations**: `alembic/` initialized, `env.py` wired to `backend/storage/database.py:Base.metadata` and `SQLALCHEMY_DATABASE_URL`. Use `alembic revision --autogenerate -m "..."` for schema changes.
+- **OTel OTLP support**: `tracing.py` auto-detects `OTEL_EXPORTER_OTLP_ENDPOINT` env var — if set, uses `OTLPSpanExporter` (gRPC); falls back to `ConsoleSpanExporter` for development.
+- **CORS**: origins read from `CORS_ORIGINS` env var (comma-separated), defaults to `*` for development.
 - **Checkpointer pending_writes**: `_load_writes` must return `(task_id, channel, value)` triples for LangGraph 0.2+ compatibility. Old format `(channel, value)` causes "not enough values to unpack (expected 3, got 2)".
 - **Milvus pymilvus 2.5 API**: `client.search()` uses `search_params` not `param`. Silent 0-result failure with old param name.
 - **Milvus gRPC reconnect**: `_ensure_connected()` calls `get_load_state()` before each query; resets client on failure to prevent "closed channel" errors.

@@ -171,25 +171,45 @@ def generate_sql(question: str, schema: str, tenant_id: int = None) -> str:
     return sql
 
 
-def execute_sql(sql: str) -> dict:
+def execute_sql(sql: str, tenant_id: int = 0, user_id: int = 0) -> dict:
     """执行只读 SQL 并返回结果。非 SELECT 语句会被拒绝。"""
     import datetime
     import decimal
 
     cleaned = sql.strip().rstrip(";").strip()
     if not cleaned.upper().startswith("SELECT"):
-        return {
+        result = {
             "error": "non_select",
             "sql": cleaned,
             "message": "仅允许执行 SELECT 查询",
         }
+        from backend.billing.audit import log_audit_event as _log
+        _db = SessionLocal()
+        try:
+            _log(db=_db, tenant_id=tenant_id, user_id=user_id,
+                 action="sql_execute", target=sql[:200],
+                 result_summary=result.get("message"),
+                 risk_level="high")
+        finally:
+            _db.close()
+        return result
 
     # Defense-in-depth: verify tenant_id constraint is present for tenant-scoped tables
     tenant_scoped_tables = ["chat_sessions", "chat_messages", "document_index", "parent_chunks"]
     sql_lower = cleaned.lower()
     for table in tenant_scoped_tables:
         if table in sql_lower and "tenant_id" not in sql_lower:
-            return {"error": sql, "message": f"SECURITY: Query on {table} must include tenant_id filter"}
+            result = {"error": sql, "message": f"SECURITY: Query on {table} must include tenant_id filter"}
+            from backend.billing.audit import log_audit_event as _log
+            _db = SessionLocal()
+            try:
+                _log(db=_db, tenant_id=tenant_id, user_id=user_id,
+                     action="sql_execute", target=sql[:200],
+                     result_summary=result.get("message"),
+                     risk_level="high")
+            finally:
+                _db.close()
+            return result
 
     db = SessionLocal()
     try:
@@ -208,16 +228,29 @@ def execute_sql(sql: str) -> dict:
                 else:
                     serialized[c] = v
             rows.append(serialized)
-        return {
+        result_dict = {
             "columns": columns,
             "rows": rows,
             "row_count": len(rows),
             "sql": cleaned,
         }
     except Exception as e:
-        return {"error": "execution_failed", "sql": cleaned, "message": str(e)}
+        result_dict = {"error": "execution_failed", "sql": cleaned, "message": str(e)}
     finally:
         db.close()
+
+    from backend.billing.audit import log_audit_event as _log
+    _db = SessionLocal()
+    try:
+        risk_level = "high" if result_dict.get("error") else "low"
+        _log(db=_db, tenant_id=tenant_id, user_id=user_id,
+             action="sql_execute", target=sql[:200],
+             result_summary=f"rows: {result_dict.get('row_count', 0)}" if not result_dict.get("error") else result_dict.get("error"),
+             risk_level=risk_level)
+    finally:
+        _db.close()
+
+    return result_dict
 
 
 def format_sql_result(result: dict) -> str:

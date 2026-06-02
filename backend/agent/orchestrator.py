@@ -379,6 +379,21 @@ def rag_specialist_node(state: SupervisorState) -> dict:
 
     # Scenario A: RAG 低置信度 → HITL 中断
     if rag_result.get("force_interrupt"):
+        from backend.billing.audit import log_audit_event
+        _db = SessionLocal()
+        try:
+            log_audit_event(
+                db=_db,
+                tenant_id=user_ctx.get("tenant_id", 0),
+                user_id=user_ctx.get("user_id", 0),
+                action="hitl_interrupt", target="low_confidence_rag",
+                arguments=user_query[:500],
+                result_summary="HITL approval required",
+                risk_level="high",
+            )
+        finally:
+            _db.close()
+
         emit_rag_step("🛑", "HITL 中断 — RAG检索置信度过低，挂起工作流等待人工决策")
         interrupt({
             "type": "hitl_rag_grade",
@@ -561,6 +576,21 @@ def data_analyst_node(state: SupervisorState) -> dict:
     result = execute_sql(sql)
 
     if result.get("error") == "non_select":
+        from backend.billing.audit import log_audit_event
+        _db = SessionLocal()
+        try:
+            log_audit_event(
+                db=_db,
+                tenant_id=user_ctx.get("tenant_id", 0),
+                user_id=user_ctx.get("user_id", 0),
+                action="hitl_interrupt", target="non_select_sql",
+                arguments=sql[:500],
+                result_summary="HITL approval required",
+                risk_level="high",
+            )
+        finally:
+            _db.close()
+
         emit_rag_step("🛑", "HITL 审核 — 检测到非SELECT语句，需人工批准后执行", agent="data_analyst")
         interrupt({
             "type": "hitl_sql_approval",

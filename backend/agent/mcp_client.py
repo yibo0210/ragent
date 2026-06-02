@@ -149,12 +149,30 @@ class MCPConnectionManager:
         """获取所有已连接 Server 的工具。"""
         return {name: conn.tools for name, conn in self._connections.items() if conn.is_connected}
 
-    async def call_tool(self, server_name: str, tool_name: str, arguments: dict) -> dict:
+    async def call_tool(self, server_name: str, tool_name: str, arguments: dict,
+                        tenant_id: int = 0, user_id: int = 0) -> dict:
         """调用 MCP 工具。"""
         conn = self._connections.get(server_name)
         if not conn:
             return {"error": f"未找到 Server: {server_name}"}
-        return await conn.call_tool(tool_name, arguments)
+        result = await conn.call_tool(tool_name, arguments)
+
+        from backend.billing.audit import log_audit_event
+        from backend.storage.database import SessionLocal
+        _db = SessionLocal()
+        try:
+            risk_level = "high" if any(kw in tool_name.lower() for kw in ["write", "delete", "send", "execute"]) else "low"
+            log_audit_event(
+                db=_db, tenant_id=tenant_id, user_id=user_id,
+                action="mcp_tool_call", target=f"{server_name}/{tool_name}",
+                arguments=str(arguments)[:2000],
+                result_summary=str(result.get("content", ""))[:500],
+                risk_level=risk_level,
+            )
+        finally:
+            _db.close()
+
+        return result
 
     def is_connected(self, server_name: str) -> bool:
         """检查连接状态。"""

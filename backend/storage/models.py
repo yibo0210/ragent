@@ -19,6 +19,7 @@ class ChatSession(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 
+    tenant_id: Mapped[int] = mapped_column(Integer, ForeignKey("tenants.id"), nullable=False, index=True, server_default="1")
     messages = relationship("ChatMessage", back_populates="session", cascade="all, delete-orphan")
 
 
@@ -53,6 +54,7 @@ class ParentChunk(Base):
     is_deleted: Mapped[bool] = mapped_column(default=False, nullable=False, index=True)
     version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     associated_media_urls: Mapped[str] = mapped_column(String(2048), default="", nullable=False)
+    tenant_id: Mapped[int] = mapped_column(Integer, ForeignKey("tenants.id"), nullable=False, index=True, server_default="1")
 
 
 class GraphCheckpoint(Base):
@@ -99,6 +101,7 @@ class DocumentIndex(Base):
     chunk_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    tenant_id: Mapped[int] = mapped_column(Integer, ForeignKey("tenants.id"), nullable=False, index=True, server_default="1")
 
 
 class QueryCacheStore(Base):
@@ -114,6 +117,7 @@ class QueryCacheStore(Base):
     ttl_seconds: Mapped[int] = mapped_column(Integer, default=86400, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    tenant_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("tenants.id"), nullable=True, index=True)
 
 
 class GraphCheckpointWrite(Base):

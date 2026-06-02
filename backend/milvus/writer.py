@@ -57,6 +57,7 @@ class MilvusWriter:
                     "root_chunk_id": doc.get("root_chunk_id", ""),
                     "chunk_level": int(doc.get("chunk_level", 0)),
                     "is_deleted": False,
+                    "tenant_id": int(doc.get("tenant_id", 0)),
                 }
                 for doc, dense_emb, sparse_emb in zip(batch, dense_embeddings, sparse_embeddings)
             ]

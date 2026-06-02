@@ -52,6 +52,7 @@ class MilvusManager:
             schema.add_field("chunk_idx", DataType.INT64)
             schema.add_field("chunk_id", DataType.VARCHAR, max_length=512)
             schema.add_field("is_deleted", DataType.BOOL)
+            schema.add_field("tenant_id", DataType.INT64, description="Tenant ID for multi-tenant isolation")
 
             index_params = client.prepare_index_params()
             index_params.add_index(field_name="dense_embedding", index_type="HNSW", metric_type="IP")

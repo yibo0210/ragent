@@ -19,9 +19,10 @@ class UserContext:
 
 
 def _get_current_user(
-    token: str = Depends(oauth2_scheme),
-    db: Session = Depends(get_db),
+    token: str,
+    db: Session,
 ) -> UserContext:
+    """Core auth logic — called directly in tests, wrapped by get_current_user for FastAPI."""
     if token is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -46,5 +47,9 @@ def _get_current_user(
     )
 
 
-get_current_user = _get_current_user
-get_current_user.__wrapped__ = _get_current_user
+def get_current_user(
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+) -> UserContext:
+    """FastAPI dependency: extract and validate the current user from JWT token."""
+    return _get_current_user(token, db)

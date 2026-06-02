@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import patch, MagicMock
-from backend.auth.dependencies import UserContext, get_current_user
+from backend.auth.dependencies import UserContext, _get_current_user
 from backend.auth.jwt_handler import encode_token
 
 
@@ -22,7 +22,7 @@ def valid_token():
 
 
 def test_user_context_from_token(valid_token, mock_db):
-    ctx = get_current_user.__wrapped__(valid_token, mock_db)
+    ctx = _get_current_user(valid_token, mock_db)
     assert ctx.user_id == 1
     assert ctx.tenant_id == 1
     assert ctx.tenant_name == "acme"
@@ -32,9 +32,9 @@ def test_user_context_from_token(valid_token, mock_db):
 
 def test_user_context_missing_token(mock_db):
     with pytest.raises(Exception):
-        get_current_user.__wrapped__(None, mock_db)
+        _get_current_user(None, mock_db)
 
 
 def test_user_context_invalid_token(mock_db):
     with pytest.raises(Exception):
-        get_current_user.__wrapped__("bad.token.here", mock_db)
+        _get_current_user("bad.token.here", mock_db)

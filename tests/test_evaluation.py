@@ -59,7 +59,7 @@ class TestGoldenDataset:
     def test_query_types(self):
         from backend.evaluation.dataset import load_golden_dataset
         data = load_golden_dataset()
-        valid_types = {"conceptual", "detail", "cross_doc", "global_summary", "realtime", "chat", "data_query"}
+        valid_types = {"conceptual", "detail", "cross_doc", "global_summary", "realtime", "chat", "data_query", "privilege_escalation"}
         for item in data:
             qt = item.get("query_type", "")
             assert qt in valid_types, f"{item['id']}: invalid query_type '{qt}'"

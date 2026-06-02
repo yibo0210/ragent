@@ -23,7 +23,7 @@ class TenantRateLimiter:
         try:
             pipe.execute()
         except Exception:
-            pass  # fail-open
+            pass  # fail-open: Redis unavailable, skip rate limit counting
 
     def get_current_count(self, tenant_id: int) -> int:
         ts = int(time.time())

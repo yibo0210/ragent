@@ -49,9 +49,8 @@ class LoadMonitor:
             pipe.incr(key)
             pipe.expire(key, self.window)
             pipe.execute()
-        except Exception:
-            # Redis 不可用时静默降级
-            pass
+        except Exception as e:
+            log.warning("load_monitor_redis_unavailable", error=str(e))
 
     def evaluate_state(self) -> SystemState:
         """根据当前 QPS 评估系统状态（强制查询 Redis）。"""
@@ -62,8 +61,8 @@ class LoadMonitor:
         log.info("load_monitor_evaluate", qps=qps, state=state.value)
         try:
             Metrics.set_circuit_breaker("load_monitor", {"normal": 0, "warning": 1, "critical": 2}.get(state.value, 0))
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("load_monitor_metrics_failed", error=str(e))
         return state
 
     def get_state(self) -> SystemState:

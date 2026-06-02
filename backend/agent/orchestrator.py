@@ -584,10 +584,16 @@ def data_analyst_node(state: SupervisorState) -> dict:
     import asyncio
     mcp_sources = []
     try:
-        loop = asyncio.get_event_loop()
-        mcp_sources = loop.run_until_complete(get_mcp_data_sources())
-    except Exception:
-        pass
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            mcp_sources = asyncio.run(get_mcp_data_sources())
+        else:
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                mcp_sources = pool.submit(asyncio.run, get_mcp_data_sources()).result()
+    except Exception as e:
+        log.warning("mcp_data_sources_failed", error=str(e))
 
     # v14: 提取 tenant_id 用于 SQL 租户隔离
     user_ctx = state.get("user_context", {}) or {}
@@ -642,10 +648,10 @@ def data_analyst_node(state: SupervisorState) -> dict:
                     "description": source["description"],
                     "input_schema": source.get("input_schema", {}),
                 }
-                args = loop.run_until_complete(generate_mcp_query(user_query, tool_schema))
+                args = asyncio.run(generate_mcp_query(user_query, tool_schema))
                 if args:
                     emit_rag_step("📡", f"调用 {source['server_name']}/{source['tool_name']}", agent="data_analyst")
-                    mcp_result = loop.run_until_complete(
+                    mcp_result = asyncio.run(
                         execute_mcp_query(source["server_name"], source["tool_name"], args)
                     )
                     mcp_results.append({

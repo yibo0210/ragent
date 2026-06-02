@@ -79,7 +79,7 @@ def emit_rag_step(icon: str, label: str, detail: str = "", agent: str = "rag_spe
             if not _RAG_STEP_LOOP.is_closed():
                 _RAG_STEP_LOOP.call_soon_threadsafe(_RAG_STEP_QUEUE.put_nowait, step)
         except Exception:
-            pass
+            pass  # SSE queue closed, caller disconnected
 
 
 def emit_graph_step(icon: str, message: str, agent: str = "local_graph_search"):
@@ -112,7 +112,7 @@ def emit_token(token: str):
                     {"type": "content", "content": token}
                 )
         except Exception:
-            pass
+            pass  # SSE queue closed, caller disconnected
 
 
 def get_current_weather(location: str, extensions: Optional[str] = "base") -> str:

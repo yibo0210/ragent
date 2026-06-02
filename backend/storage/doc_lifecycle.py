@@ -66,8 +66,9 @@ def mark_document_deleted(filename: str, tenant_id: int = None) -> dict:
         try:
             from backend.cache.invalidation import invalidate_by_filename
             cache_invalidated = invalidate_by_filename(filename)
-        except Exception:
-            pass
+        except Exception as e:
+            from backend.observability import get_logger
+            get_logger("ragent.doc_lifecycle").warning("cache_invalidation_failed", filename=filename, error=str(e))
 
         return {
             "filename": filename,

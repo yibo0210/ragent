@@ -134,27 +134,43 @@ class ConversationStorage:
 
         db = SessionLocal()
         try:
+            from sqlalchemy import func
             query = db.query(ChatSession)
             if tenant_id is not None:
                 query = query.filter(ChatSession.tenant_id == tenant_id)
             sessions = query.order_by(ChatSession.updated_at.desc()).all()
+            if not sessions:
+                return []
+
+            # Single-pass: batch-fetch message counts and first messages
+            session_ids = [s.id for s in sessions]
+            counts = dict(
+                db.query(ChatMessage.session_ref_id, func.count(ChatMessage.id))
+                .filter(ChatMessage.session_ref_id.in_(session_ids))
+                .group_by(ChatMessage.session_ref_id)
+                .all()
+            )
+            first_msgs = dict(
+                db.query(ChatMessage.session_ref_id, func.min(ChatMessage.id))
+                .filter(ChatMessage.session_ref_id.in_(session_ids), ChatMessage.message_type == "human")
+                .group_by(ChatMessage.session_ref_id)
+                .all()
+            )
+            first_msg_ids = [v for v in first_msgs.values()]
+            msg_contents = {}
+            if first_msg_ids:
+                msgs = db.query(ChatMessage).filter(ChatMessage.id.in_(first_msg_ids)).all()
+                msg_contents = {m.id: m.content[:20] if m.content else "" for m in msgs}
+
             result = []
             for s in sessions:
-                count = db.query(ChatMessage).filter(ChatMessage.session_ref_id == s.id).count()
-                first_msg = (
-                    db.query(ChatMessage)
-                    .filter(ChatMessage.session_ref_id == s.id, ChatMessage.message_type == "human")
-                    .order_by(ChatMessage.id.asc())
-                    .first()
-                )
-                result.append(
-                    {
-                        "session_id": s.session_id,
-                        "updated_at": s.updated_at.isoformat(),
-                        "message_count": count,
-                        "first_message": first_msg.content[:20] if first_msg else "",
-                    }
-                )
+                first_id = first_msgs.get(s.id)
+                result.append({
+                    "session_id": s.session_id,
+                    "updated_at": s.updated_at.isoformat(),
+                    "message_count": counts.get(s.id, 0),
+                    "first_message": msg_contents.get(first_id, "") if first_id else "",
+                })
             cache.set_json(self._sessions_cache_key(tenant_id), result)
             return result
         finally:
@@ -297,8 +313,8 @@ async def _notify_hitl_webhook(tenant_id: int, interrupt_data: dict):
                 },
                 timeout=aiohttp.ClientTimeout(total=5),
             )
-    except Exception:
-        pass  # non-fatal
+    except Exception as e:
+        log.warning("hitl_webhook_failed", tenant_id=tenant_id, error=str(e))
 
 
 # ---------------------------------------------------------------------------
@@ -313,8 +329,8 @@ def chat_with_agent(user_text: str, session_id: str = "default_session", user_co
         if cached:
             return {"response": cached["response"], "cached": True,
                     "source": "semantic_cache"}
-    except Exception:
-        pass
+    except Exception as e:
+        log.debug("semantic_cache_lookup_failed", error=str(e))
     # ---
 
     messages, _ = _prepare_messages(session_id, user_text)

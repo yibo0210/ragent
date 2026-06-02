@@ -194,6 +194,24 @@ def execute_sql(sql: str, tenant_id: int = 0, user_id: int = 0) -> dict:
             _db.close()
         return result
 
+    # Reject multi-statement queries (e.g. "SELECT 1; DROP TABLE users;")
+    if ";" in cleaned:
+        result = {
+            "error": "non_select",
+            "sql": cleaned,
+            "message": "不允许执行多条语句",
+        }
+        from backend.billing.audit import log_audit_event as _log
+        _db = SessionLocal()
+        try:
+            _log(db=_db, tenant_id=tenant_id, user_id=user_id,
+                 action="sql_execute", target=sql[:200],
+                 result_summary=result.get("message"),
+                 risk_level="high")
+        finally:
+            _db.close()
+        return result
+
     # Defense-in-depth: verify tenant_id constraint is present for tenant-scoped tables
     tenant_scoped_tables = ["chat_sessions", "chat_messages", "document_index", "parent_chunks"]
     sql_lower = cleaned.lower()
@@ -213,6 +231,7 @@ def execute_sql(sql: str, tenant_id: int = 0, user_id: int = 0) -> dict:
 
     db = SessionLocal()
     try:
+        db.execute(text("SET TRANSACTION READ ONLY"))
         result = db.execute(text(cleaned))
         columns = list(result.keys())
         rows = []

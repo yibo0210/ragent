@@ -28,12 +28,15 @@ def create_app() -> FastAPI:
         try:
             from backend.agent.query_profiler import warmup
             warmup()
-        except Exception:
-            pass
+        except Exception as e:
+            from backend.observability import get_logger
+            get_logger("ragent.app").warning("query_profiler_warmup_failed", error=str(e))
 
+    from backend.config import get_settings
+    cors_origins = get_settings().cors_origins.split(",") if get_settings().cors_origins != "*" else ["*"]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=cors_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -57,8 +60,9 @@ def create_app() -> FastAPI:
         from backend.storage.cache import cache
         _limiter = TenantRateLimiter(cache._get_client())
         app.middleware("http")(create_rate_limit_middleware(_limiter))
-    except Exception:
-        pass  # Redis may not be available
+    except Exception as e:
+        from backend.observability import get_logger
+        get_logger("ragent.app").warning("rate_limit_middleware_init_failed", error=str(e))
 
     app.include_router(router)
 

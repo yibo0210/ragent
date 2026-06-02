@@ -1,7 +1,10 @@
 """Milvus 向量数据库客户端管理类"""
 import os
 import warnings
+import logging
 from dotenv import load_dotenv
+
+_log = logging.getLogger("ragent.milvus")
 from pymilvus import MilvusClient, DataType, AnnSearchRequest, RRFRanker
 
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -31,8 +34,8 @@ class MilvusManager:
         if self._client_instance:
             try:
                 self._client_instance.close()
-            except Exception:
-                pass
+            except Exception as e:
+                _log.warning("milvus_close_failed", error=str(e))
         self._client_instance = MilvusClient(uri=self.uri)
 
 #集合初始化

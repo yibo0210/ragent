@@ -171,6 +171,14 @@ async def upload_document(
     if not file_lower.endswith(supported):
         raise HTTPException(status_code=400, detail=f"不支持的文件格式 (.{filename.rsplit('.', 1)[-1] if '.' in filename else '未知'})，仅支持 PDF、Word、Excel、Markdown、图片")
 
+    # Validate file size
+    from backend.config import get_settings
+    max_size = get_settings().upload_max_size_mb * 1024 * 1024
+    content = await file.read()
+    if len(content) > max_size:
+        raise HTTPException(status_code=400, detail=f"文件过大（最大 {get_settings().upload_max_size_mb}MB）")
+    file.file.seek(0)  # rewind for downstream reads
+
     async def event_generator():
         import asyncio
         loop = asyncio.get_event_loop()
@@ -187,7 +195,6 @@ async def upload_document(
             yield f'data: {json.dumps({"type": "progress", "stage": "saving", "current": 0, "total": 0, "status": "正在保存文件..."})}\n\n'
             os.makedirs(UPLOAD_DIR, exist_ok=True)
             file_path = UPLOAD_DIR / filename
-            content = await file.read()
             with open(file_path, "wb") as f:
                 f.write(content)
 

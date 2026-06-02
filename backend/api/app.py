@@ -66,6 +66,10 @@ def create_app() -> FastAPI:
     from backend.auth.routes import router as auth_router
     app.include_router(auth_router)
 
+    # --- v15 Billing routes ---
+    from backend.billing.routes import router as billing_router
+    app.include_router(billing_router)
+
     # --- v5.0 可观测性 (must be after router + before static mount) ---
     from backend.observability import init_logging, init_tracing, init_metrics
     init_logging()

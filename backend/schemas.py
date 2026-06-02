@@ -193,3 +193,31 @@ class QueryPlanStep(BaseModel):
     query: str = ""
     dependencies: list[int] = []
     input_mapping: dict = {}
+
+
+from datetime import datetime as dt
+
+
+class TokenUsageSummary(BaseModel):
+    tenant_id: int
+    period_days: int
+    request_count: int
+    total_prompt_tokens: int
+    total_completion_tokens: int
+    total_tokens: int
+
+
+class AuditLogEntry(BaseModel):
+    id: int
+    tenant_id: int
+    user_id: int
+    action: str
+    target: Optional[str]
+    result_summary: Optional[str]
+    risk_level: str
+    created_at: dt
+
+
+class AuditLogListResponse(BaseModel):
+    logs: list[AuditLogEntry]
+    total: int

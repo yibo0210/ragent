@@ -425,6 +425,19 @@ Neo4j Full Graph
 | **Session Scoping** | `list_session_infos()` filters by `tenant_id`; cache keys are tenant-specific to prevent cross-tenant session leakage |
 | **Privilege Escalation Tests** | 4 red-team test cases (SEC001-SEC004) in golden dataset; `evaluate_security()` function checks low-privilege users cannot access high-privilege content |
 
+### SaaS Metering, Rate Limiting & Audit Trail (v15.0)
+
+| Feature | Description |
+|---------|-------------|
+| **Token Usage Tracking** | `backend/billing/token_tracker.py` — per-request `prompt_tokens`/`completion_tokens` recording to `token_usage_logs` table; `get_usage_summary()` aggregates by tenant over configurable period |
+| **Per-Tenant Rate Limiting** | `backend/billing/rate_limiter.py` — `TenantRateLimiter` uses Redis sliding-window counters per `tenant_id`; rules stored in `rate_limit_rules` table with tier-based QPS/token limits |
+| **Rate-Limit Middleware** | FastAPI HTTP middleware extracts tenant from JWT, checks QPS limit before request processing; returns 429 with `Retry-After` header when exceeded |
+| **SLA-Aware Degradation** | `LoadMonitor.get_tenant_degradation(tier)` — enterprise stays at full pipeline under CRITICAL load; premium skips Critique; free tier degrades to cache-only |
+| **Audit Trail** | `backend/billing/audit.py` — immutable `audit_logs` table records every MCP tool call, SQL execution, and HITL event with `risk_level` classification |
+| **Audit Context Manager** | `AuditContext` wraps operations with before/after semantics; automatically logs exceptions as `risk_level="high"` |
+| **Billing API** | `GET /billing/usage` returns token consumption summary; `GET /billing/audit` returns paginated audit logs with action filter — both tenant-scoped |
+| **HITL Webhook** | `HITL_WEBHOOK_URL` env var triggers POST notification to tenant admin on interrupt events; non-blocking `asyncio.create_task`, 5s timeout |
+
 ---
 
 ## Tech Stack
@@ -1051,6 +1064,18 @@ This will:
 - [x] Session scoping: list_session_infos filters by tenant_id; tenant-specific cache keys
 - [x] Privilege escalation evaluation: 4 red-team test cases + evaluate_security function
 - [x] 47 tests passing (12 integration, 9 auth, 9 isolation, 13 evaluation, 4 fingerprint)
+
+### v15.0 — SaaS Metering, Rate Limiting & Audit Trail ✓
+
+- [x] Token usage tracking: `token_usage_logs` table with per-request prompt/completion token recording
+- [x] Per-tenant rate limiting: Redis sliding-window QPS limiter with `rate_limit_rules` table
+- [x] Rate-limit middleware: FastAPI HTTP middleware returns 429 with Retry-After header
+- [x] SLA-aware degradation: enterprise/premium/free tiers with different degradation levels under load
+- [x] Audit trail: `audit_logs` table with immutable logging for MCP tool calls, SQL execution, HITL events
+- [x] Audit context manager: `AuditContext` with automatic risk level classification on success/failure
+- [x] Billing API: `GET /billing/usage` (token summary) + `GET /billing/audit` (paginated audit logs)
+- [x] HITL webhook: POST to `HITL_WEBHOOK_URL` on interrupt events for admin notification
+- [x] 40 tests passing (v14+v15 combined: 28 billing + 12 privilege escalation)
 
 ### v7.x — Planned
 

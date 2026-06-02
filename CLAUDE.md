@@ -164,6 +164,17 @@ v13: 增量图聚类引擎 — 文档摄入后自动触发局部补丁（新节�
 | `tests/test_tenant_isolation_mysql.py` | MySQL tenant_id FK tests |
 | `tests/test_tenant_isolation_milvus.py` | Milvus tenant_id schema tests |
 | `tests/test_tenant_isolation_neo4j.py` | Neo4j tenant_id MERGE tests |
+| `backend/billing/__init__.py` | Billing package init |
+| `backend/billing/models.py` | TokenUsageLog, RateLimitRule, AuditLog SQLAlchemy models |
+| `backend/billing/token_tracker.py` | Per-request token usage recording + summary queries |
+| `backend/billing/rate_limiter.py` | Per-tenant Redis sliding-window rate limiter + get_tenant_rule |
+| `backend/billing/audit.py` | Audit log writer + AuditContext context manager |
+| `backend/billing/middleware.py` | FastAPI rate-limit middleware (429 on exceeded) |
+| `backend/billing/routes.py` | /billing/usage + /billing/audit API endpoints |
+| `tests/test_token_tracker.py` | Token usage + rate limiter tests |
+| `tests/test_rate_limiter.py` | Rate limiter + SLA rule tests |
+| `tests/test_audit.py` | Audit logger + context manager tests |
+| `tests/test_billing_integration.py` | v15 billing/audit integration tests |
 | `backend/agent/query_profiler.py` | Lightweight intent classifier: keyword + embedding → L1/L2/L3 |
 | `backend/rag/dynamic_rrf.py` | Intent-driven RRF weight matrix (loads from config/weight_matrix.yaml) |
 | `config/weight_matrix.yaml` | RRF weight config: L1 Dense 70%, L2 Graph 65%, L3 balanced |
@@ -255,6 +266,13 @@ v13: 增量图聚类引擎 — 文档摄入后自动触发局部补丁（新节�
 - **v14 user_context propagation**: `SupervisorState.user_context` dict flows from JWT → routes → brain → graph → all workers. Each worker extracts `tenant_id` from `state["user_context"]` and passes to retrieval functions.
 - **v14 Data Analyst SQL isolation**: `generate_sql(tenant_id=X)` injects tenant constraint into LLM prompt. `execute_sql` has defense-in-depth: blocks queries on tenant-scoped tables without `tenant_id` in SQL text.
 - **v14 Ingestion propagation**: `run_ingestion_task(tenant_id, access_level)` passes through to Milvus writer (per-doc dict), Neo4j ingestion, DocumentIndex upsert, and ParentChunk store.
+- **v15 Token metering**: `record_token_usage(db, tenant_id, user_id, model_name, prompt_tokens, completion_tokens, agent_name, request_type)` writes to `token_usage_logs` table after each LLM call. `get_usage_summary(db, tenant_id, days)` aggregates for billing API.
+- **v15 Rate limiting**: `TenantRateLimiter(redis_client, window=10)` uses Redis sliding-window per `tenant_id`. `check_rate_limit(tenant_id, qps_limit)` returns `{allowed, current_count, limit, retry_after}`. Fail-open on Redis errors.
+- **v15 SLA tiers**: `RateLimitRule` table stores per-tenant `tier` (free/standard/premium/enterprise), `qps_limit`, `daily_token_limit`. `get_tenant_rule(db, tenant_id)` returns default free tier if no rule exists.
+- **v15 SLA degradation**: `LoadMonitor.get_tenant_degradation(tier)` maps system load + tenant tier to degradation level: enterprise=full under CRITICAL, premium=skip_critique, free=cache_only.
+- **v15 Audit logging**: `log_audit_event(db, tenant_id, user_id, action, target, arguments, result_summary, risk_level)` writes to `audit_logs` table. `AuditContext` context manager auto-logs exceptions as `risk_level="high"`.
+- **v15 Billing API**: `GET /billing/usage?days=30` returns token consumption summary. `GET /billing/audit?action=mcp_tool_call&limit=50` returns paginated audit logs. Both tenant-scoped via JWT.
+- **v15 HITL webhook**: `_notify_hitl_webhook(tenant_id, interrupt_data)` sends POST to `HITL_WEBHOOK_URL` env var on interrupt events. Non-blocking `asyncio.create_task`, 5s timeout, silent no-op if unset.
 - **Checkpointer pending_writes**: `_load_writes` must return `(task_id, channel, value)` triples for LangGraph 0.2+ compatibility. Old format `(channel, value)` causes "not enough values to unpack (expected 3, got 2)".
 - **Milvus pymilvus 2.5 API**: `client.search()` uses `search_params` not `param`. Silent 0-result failure with old param name.
 - **Milvus gRPC reconnect**: `_ensure_connected()` calls `get_load_state()` before each query; resets client on failure to prevent "closed channel" errors.

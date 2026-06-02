@@ -21,7 +21,8 @@
 14. [HITL 人机协同](#14-hitl-人机协同)
 15. [自适应检索与负载降级 (v12)](#15-自适应检索与负载降级-v12)
 16. [多租户 RBAC 与数据隔离 (v14)](#16-多租户-rbac-与数据隔离-v14)
-17. [常见面试问题与回答](#17-常见面试问题与回答)
+17. [SaaS 计量、限流与审计 (v15)](#17-saas-计量限流与审计-v15)
+18. [常见面试问题与回答](#18-常见面试问题与回答)
 18. [代码级深度追问](#18-代码级深度追问高频追问准备)
 19. [实战调试场景](#19-实战调试场景behavioral-questions)
 20. [系统设计追问](#20-系统设计追问system-design)
@@ -1291,6 +1292,89 @@ for table in tenant_scoped_tables:
 
 ---
 
+## 17. SaaS 计量、限流与审计 (v15)
+
+### 17.1 问题背景
+
+v14 完成了鉴权和数据隔离，但 SaaS 还需要三个关键能力：
+1. **计量**：追踪每个租户消耗了多少 Token，用于计费
+2. **限流**：不同套餐的租户有不同的 QPS 上限，防止免费用户滥用
+3. **审计**：所有外部工具调用（MCP、SQL）必须有不可篡改的操作日志
+
+### 17.2 Token 计量
+
+```python
+# backend/billing/token_tracker.py
+def record_token_usage(db, tenant_id, user_id, model_name,
+                       prompt_tokens, completion_tokens, agent_name):
+    log = TokenUsageLog(
+        tenant_id=tenant_id, user_id=user_id,
+        model_name=model_name, prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens, agent_name=agent_name,
+    )
+    db.add(log)
+    db.commit()
+```
+
+集成点：在 `orchestrator.py` 的每个 Worker 节点（rag_specialist_node、direct_answer_node 等）LLM 调用后，自动记录 Token 用量。
+
+### 17.3 Per-Tenant 限流
+
+```python
+# backend/billing/rate_limiter.py
+class TenantRateLimiter:
+    def __init__(self, redis_client, window=10):
+        self.redis = redis_client
+        self.window = window
+
+    def check_rate_limit(self, tenant_id, qps_limit):
+        count = self.get_current_count(tenant_id)
+        if count >= qps_limit * self.window:
+            return {"allowed": False, "retry_after": 1}
+        return {"allowed": True}
+```
+
+中间件在每个 `/chat/*` 和 `/documents/*` 请求前检查限流，超限返回 429。
+
+### 17.4 SLA 分级降级
+
+```python
+# 结合 v12 的 LoadMonitor
+def get_tenant_degradation(self, tenant_tier):
+    state = self.get_state()
+    if state == CRITICAL:
+        if tenant_tier == "enterprise": return "full"
+        if tenant_tier == "premium": return "skip_critique"
+        return "cache_only"
+```
+
+企业版用户在系统高负载时仍享受全链路服务，免费版降级为仅缓存命中。
+
+### 17.5 审计追踪
+
+```python
+# backend/billing/audit.py
+class AuditContext:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type is not None:
+            self.risk_level = "high"  # 异常自动标记为高风险
+        log_audit_event(...)
+```
+
+三路审计集成：
+- MCP 工具调用：`mcp_client.call_tool` 后自动记录
+- SQL 执行：`data_analyst.execute_sql` 后自动记录
+- HITL 中断：`orchestrator` 的 `interrupt()` 前自动记录
+
+### 17.6 面试话术
+
+> "v15 完成了 SaaS 的计费和合规层。Token 计量在每次 LLM 调用后自动记录到 MySQL，支持按租户、时间段汇总。限流用 Redis 滑动窗口实现 per-tenant QPS 控制，不同套餐有不同上限，超限直接返回 429。降级策略和 v12 的负载监控联动——企业版在系统 CRITICAL 时仍走完整链路，免费版降级为缓存命中。审计日志记录所有 MCP 工具调用和 SQL 执行，用上下文管理器包装，异常自动标记为高风险。HITL 中断时还会 POST Webhook 通知租户管理员。"
+
+---
+
 ## 17. 常见面试问题与回答
 
 ### Q1: 介绍一下你的项目？
@@ -1539,7 +1623,7 @@ RAG = Retrieval Augmented Generation，检索增强生成。核心思想是**让
 
 ---
 
-## 18. 代码级深度追问（高频追问准备）
+## 19. 代码级深度追问（高频追问准备）
 
 ### Q16: Supervisor 的 JSON 解析是怎么做的？为什么不用 with_structured_output？
 
@@ -1841,7 +1925,7 @@ graph.add_edge("data_analyst", END)   # 跳过 critique
 
 ---
 
-## 19. 实战调试场景（Behavioral Questions）
+## 20. 实战调试场景（Behavioral Questions）
 
 ### Q24: 如果用户反馈"回答不准确"，你怎么排查？
 
@@ -1914,7 +1998,7 @@ graph.add_edge("data_analyst", END)   # 跳过 critique
 
 ---
 
-## 20. 系统设计追问（System Design）
+## 21. 系统设计追问（System Design）
 
 ### Q27: 如果让你重新设计这个系统，你会做什么不同的决定？
 
@@ -1957,7 +2041,7 @@ graph.add_edge("data_analyst", END)   # 跳过 critique
 
 ---
 
-## 21. 高频概念追问
+## 22. 高频概念追问
 
 ### Q30: RRF 和 BM25 的区别？
 
@@ -2033,7 +2117,7 @@ log.info("user_logged_in", user_id=123)
 
 ---
 
-## 22. LLM 基础原理（必考）
+## 23. LLM 基础原理（必考）
 
 ### Q35: Transformer 的核心机制是什么？
 
@@ -2123,7 +2207,7 @@ CoT Prompt：Q: 8+5×2=? A: 先算乘法 5×2=10，再算加法 8+10=18
 
 ---
 
-## 23. Agent 架构模式（高频）
+## 24. Agent 架构模式（高频）
 
 ### Q39: ReAct 模式是什么？你的系统和它有什么关系？
 
@@ -2238,7 +2322,7 @@ LangGraph 的 StateGraph 保证每个节点的执行是原子性的——一个�
 
 ---
 
-## 24. Embedding 模型原理（必考）
+## 25. Embedding 模型原理（必考）
 
 ### Q43: Embedding 模型是怎么训练的？
 
@@ -2298,7 +2382,7 @@ sparse_embedding = embedding_service.get_sparse_embedding(query)  # BM25
 
 ---
 
-## 25. 高级 RAG 模式（高频）
+## 26. 高级 RAG 模式（高频）
 
 ### Q46: Corrective RAG (CRAG) 是什么？你的系统有类似机制吗？
 
@@ -2376,7 +2460,7 @@ Adaptive RAG 根据查询特征动态调整检索策略：
 
 ---
 
-## 26. 生产工程（实战）
+## 27. 生产工程（实战）
 
 ### Q50: 如何控制 LLM API 成本？
 
@@ -2459,7 +2543,7 @@ Critique：~1000 tokens（verification）
 
 ---
 
-## 27. 安全与防护（生产必问）
+## 28. 安全与防护（生产必问）
 
 ### Q53: 如何防止 Agent 执行危险操作？
 
@@ -2511,7 +2595,7 @@ Critique：~1000 tokens（verification）
 
 ---
 
-## 28. 面试技巧总结
+## 29. 面试技巧总结
 
 ### 回答问题的 STAR 框架
 
@@ -2555,3 +2639,7 @@ Critique：~1000 tokens（verification）
 14. **Redis Streams 管线**：三阶段消费者组 + 死信处理，替代 arq 单队列（v13）
 15. **多租户 RBAC**：JWT 鉴权 + Milvus pre-filtering + Neo4j 子图约束 + MySQL 行级隔离（v14）
 16. **权限越级评测**：红蓝对抗测试集 + evaluate_security 函数，验证隔离无懈可击（v14）
+17. **Token 计量**：per-request token 用量记录 + 按租户汇总查询，支撑 SaaS 计费（v15）
+18. **Per-Tenant 限流**：Redis 滑动窗口 QPS 控制 + SLA 分级降级（enterprise/full, free/cache_only）（v15）
+19. **不可篡改审计**：MCP 工具调用 + SQL 执行 + HITL 事件全量审计，risk_level 自动分类（v15）
+20. **HITL Webhook**：中断事件实时通知租户管理员，支持审批流集成（v15）

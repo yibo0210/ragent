@@ -41,10 +41,16 @@ def local_graph_search(
         """
             time_params["filter_year"] = year
 
+        tenant_clause = ""
+        if tenant_id is not None:
+            tenant_clause = "AND a.tenant_id = $tenant_id AND b.tenant_id = $tenant_id"
+            time_params["tenant_id"] = tenant_id
+
         cypher = f"""
         MATCH (a:Entity)-[r:RELATES_TO]->(b:Entity)
         WHERE any(cid IN r.source_chunks WHERE cid IN $chunk_ids)
         {time_clause}
+        {tenant_clause}
         RETURN a.name AS subject, r.predicate AS predicate, b.name AS object,
                r.description AS desc, r.weight AS weight
         LIMIT 30
@@ -58,14 +64,21 @@ def local_graph_search(
                 entity_names.add(t["subject"])
                 entity_names.add(t["object"])
 
-            neighbor_cypher = """
+            neighbor_params: dict = {"names": list(entity_names)}
+            neighbor_tenant_clause = ""
+            if tenant_id is not None:
+                neighbor_tenant_clause = "AND e.tenant_id = $tenant_id AND other.tenant_id = $tenant_id"
+                neighbor_params["tenant_id"] = tenant_id
+
+            neighbor_cypher = f"""
             MATCH (e:Entity)-[r:RELATES_TO]-(other:Entity)
             WHERE e.name IN $names
+            {neighbor_tenant_clause}
             RETURN distinct e.name AS source, r.predicate AS predicate,
                    other.name AS target, r.description AS desc
             LIMIT 20
             """
-            neighbors = run_cypher(neighbor_cypher, {"names": list(entity_names)})
+            neighbors = run_cypher(neighbor_cypher, neighbor_params)
             graph_triples.extend(neighbors)
 
     # Step 3: Normalize keys

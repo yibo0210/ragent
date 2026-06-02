@@ -8,10 +8,11 @@ import os
 import re
 from pathlib import Path
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 
 from backend.agent.brain import chat_with_agent, chat_with_agent_stream, resume_hitl_graph, storage
+from backend.auth.dependencies import UserContext, get_current_user
 from backend.storage.cache import cache
 from backend.documents.loader import DocumentLoader
 from backend.embedding.service import EmbeddingService
@@ -150,7 +151,11 @@ async def list_documents():
 
 #上传并解析文档（SSE 流式返回进度）
 @router.post("/documents/upload")
-async def upload_document(file: UploadFile = File(...)):
+async def upload_document(
+    file: UploadFile = File(...),
+    access_level: int = Form(default=0),
+    user: UserContext = Depends(get_current_user),
+):
     filename = file.filename or ""
     if not filename:
         raise HTTPException(status_code=400, detail="文件名为空，请重新选择文件后上传")
@@ -183,7 +188,7 @@ async def upload_document(file: UploadFile = File(...)):
             from backend.documents.fingerprint import compute_file_hash
             from backend.storage.doc_lifecycle import upsert_document_index
             file_hash = compute_file_hash(str(file_path))
-            index_result = upsert_document_index(filename, file_hash, 0)
+            index_result = upsert_document_index(filename, file_hash, 0, tenant_id=user.tenant_id)
             if index_result["action"] == "skipped":
                 yield f'data: {json.dumps({"type": "complete", "filename": filename, "chunks": 0, "status": "unchanged", "message": f"文件内容未变化，跳过处理：{filename}"})}\n\n'
                 return
@@ -197,6 +202,8 @@ async def upload_document(file: UploadFile = File(...)):
                     "filename": filename,
                     "file_path": str(file_path),
                     "file_hash": file_hash,
+                    "tenant_id": user.tenant_id,
+                    "access_level": access_level or user.access_level,
                 })
             except Exception:
                 stream_msg_id = None
@@ -211,7 +218,10 @@ async def upload_document(file: UploadFile = File(...)):
                 from backend.pipeline.task_queue import get_redis_settings
                 from arq import create_pool
                 pool = await create_pool(get_redis_settings())
-                job = await pool.enqueue_job("run_ingestion_task", filename, str(file_path), file_hash)
+                job = await pool.enqueue_job(
+                    "run_ingestion_task", filename, str(file_path), file_hash,
+                    user.tenant_id, access_level or user.access_level,
+                )
                 await pool.close()
                 job_id = job.job_id if job else None
             except Exception:
@@ -236,6 +246,14 @@ async def upload_document(file: UploadFile = File(...)):
             parent_docs = [d for d in new_docs if int(d.get("chunk_level", 0)) in (1, 2)]
             leaf_docs = [d for d in new_docs if int(d.get("chunk_level", 0)) == 3]
             total_chunks = len(leaf_docs)
+
+            # 2.1 Inject tenant_id and access_level into doc dicts
+            resolved_access = access_level or user.access_level
+            for doc in parent_docs:
+                doc["tenant_id"] = user.tenant_id
+            for doc in leaf_docs:
+                doc["tenant_id"] = user.tenant_id
+                doc["access_level"] = resolved_access
 
             yield f'data: {json.dumps({"type": "progress", "stage": "parsed", "current": 0, "total": total_chunks, "status": f"文档解析完成，共 {total_chunks} 个片段"})}\n\n'
 
@@ -289,6 +307,7 @@ async def upload_document(file: UploadFile = File(...)):
                     stats = await loop.run_in_executor(
                         None, ingest_extraction_result,
                         result.entities, result.relations, l3_ids,
+                        user.tenant_id,
                     )
                     graph_status = f"知识图谱: {stats['entities']} 实体, {stats['relations']} 关系"
                     yield f'data: {json.dumps({"type": "progress", "stage": "graph", "current": len(l1_chunks), "total": len(l1_chunks), "status": graph_status})}\n\n'
@@ -297,7 +316,7 @@ async def upload_document(file: UploadFile = File(...)):
                     yield f'data: {json.dumps({"type": "progress", "stage": "graph", "status": f"图谱抽取跳过: {e}"})}\n\n'
 
             # 6. 更新文档索引（最终 chunk 数量）
-            upsert_document_index(filename, file_hash, total_chunks)
+            upsert_document_index(filename, file_hash, total_chunks, tenant_id=user.tenant_id)
 
             # 7. 完成
             yield f'data: {json.dumps({"type": "complete", "filename": filename, "chunks": total_chunks, "message": f"成功上传：{filename}"})}\n\n'

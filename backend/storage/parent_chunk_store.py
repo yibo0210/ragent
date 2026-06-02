@@ -58,6 +58,7 @@ class ParentChunkStore:
                     "root_chunk_id": doc.get("root_chunk_id", ""),
                     "chunk_level": int(doc.get("chunk_level", 0) or 0),
                     "chunk_idx": int(doc.get("chunk_idx", 0) or 0),
+                    "tenant_id": int(doc.get("tenant_id", 0)),
                     "updated_at": datetime.now(timezone.utc),
                 }
                 cache_payload = {

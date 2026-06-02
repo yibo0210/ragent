@@ -55,7 +55,10 @@ def _get_milvus_writer():
 # Core task
 # ---------------------------------------------------------------------------
 
-async def run_ingestion_task(ctx, filename: str, file_path: str, file_hash: str):
+async def run_ingestion_task(
+    ctx, filename: str, file_path: str, file_hash: str,
+    tenant_id: int = 0, access_level: int = 1
+):
     """Replicate the full ingestion pipeline that currently lives in routes.py.
 
     Steps:
@@ -91,6 +94,13 @@ async def run_ingestion_task(ctx, filename: str, file_path: str, file_hash: str)
     leaf_docs = [d for d in new_docs if int(d.get("chunk_level", 0)) == 3]
     total_chunks = len(leaf_docs)
 
+    # 2.1 Inject tenant_id and access_level into doc dicts
+    for doc in parent_docs:
+        doc["tenant_id"] = tenant_id
+    for doc in leaf_docs:
+        doc["tenant_id"] = tenant_id
+        doc["access_level"] = access_level
+
     # 3. Store parent chunks
     await loop.run_in_executor(None, parent_store.upsert_documents, parent_docs)
 
@@ -110,6 +120,7 @@ async def run_ingestion_task(ctx, filename: str, file_path: str, file_hash: str)
             await loop.run_in_executor(
                 None, ingest_extraction_result,
                 result.entities, result.relations, l3_ids,
+                tenant_id,
             )
         except Exception as e:
             print(f"[WORKER] Graph extraction failed (non-fatal): {e}")
@@ -132,7 +143,7 @@ async def run_ingestion_task(ctx, filename: str, file_path: str, file_hash: str)
             print(f"[v13] 摘要更新失败（非致命）: {e}")
 
     # 6. Update document index with final chunk count
-    upsert_document_index(filename, file_hash, total_chunks)
+    upsert_document_index(filename, file_hash, total_chunks, tenant_id=tenant_id)
 
     return {"filename": filename, "chunks": total_chunks}
 

@@ -57,7 +57,7 @@ def mark_document_deleted(filename: str) -> dict:
         }
 
 
-def upsert_document_index(filename: str, file_hash: str, chunk_count: int) -> dict:
+def upsert_document_index(filename: str, file_hash: str, chunk_count: int, tenant_id: int = 0) -> dict:
     """Upsert DocumentIndex: 创建/更新/跳过文档索引记录。
 
     Returns:
@@ -75,6 +75,7 @@ def upsert_document_index(filename: str, file_hash: str, chunk_count: int) -> di
                 chunk_count=chunk_count,
                 is_deleted=False,
                 version=1,
+                tenant_id=tenant_id,
                 created_at=now,
                 updated_at=now,
             )
@@ -92,6 +93,7 @@ def upsert_document_index(filename: str, file_hash: str, chunk_count: int) -> di
         doc.chunk_count = chunk_count
         doc.is_deleted = False
         doc.version += 1
+        doc.tenant_id = tenant_id
         doc.updated_at = now
         session.commit()
         return {"action": "updated", "old_hash": old_hash, "new_hash": file_hash}

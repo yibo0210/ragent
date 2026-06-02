@@ -5,6 +5,7 @@ from backend.storage.graph_client import run_cypher
 
 def local_graph_search(
     query: str, top_k: int = 5, graph_hops: int = 1, time_filter: dict = None,
+    tenant_id: int = None,
 ) -> dict:
     """
     局部图搜索:
@@ -13,7 +14,7 @@ def local_graph_search(
     3. 合并 CHUNKS + GRAPH TRIPLES → 返回上下文
     """
     # Step 1: Vector search
-    retrieved = retrieve_documents(query, top_k=top_k)
+    retrieved = retrieve_documents(query, top_k=top_k, tenant_id=tenant_id)
     chunks = retrieved.get("docs", [])
 
     # Step 2: Graph expansion
@@ -100,7 +101,7 @@ def local_graph_search(
     }
 
 
-def global_graph_search(query: str, top_k: int = 5) -> dict:
+def global_graph_search(query: str, top_k: int = 5, tenant_id: int = None) -> dict:
     """
     全局图搜索: 在社区摘要索引中检索匹配的社区综述。
     依赖 Phase 3 已将摘要索引到 Milvus（file_type = CommunitySummary）。
@@ -112,8 +113,11 @@ def global_graph_search(query: str, top_k: int = 5) -> dict:
 
     summaries = []
     try:
+        filter_expr = 'file_type == "CommunitySummary"'
+        if tenant_id is not None:
+            filter_expr += f' && (tenant_id == {tenant_id})'
         raw = milvus.query(
-            filter_expr='file_type == "CommunitySummary"',
+            filter_expr=filter_expr,
             output_fields=["text", "filename", "chunk_id"],
             limit=100,
         )

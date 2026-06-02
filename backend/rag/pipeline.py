@@ -99,6 +99,7 @@ class RAGState(TypedDict):
     grade_fail_count: int
     force_interrupt: bool
     intent_level: Optional[str]  # v12: 意图级别
+    tenant_id: Optional[int]  # v14: 租户隔离
 
 
 def _format_docs(docs: List[dict]) -> str:
@@ -116,8 +117,9 @@ def _format_docs(docs: List[dict]) -> str:
 def retrieve_initial(state: RAGState) -> RAGState:
     query = state["question"]
     intent_level = state.get("intent_level")
+    tenant_id = state.get("tenant_id")
     emit_rag_step("🔍", "混合检索 — Dense向量+BM25稀疏向量在Milvus中双路召回", f"查询: {query[:50]}")
-    retrieved = retrieve_documents(query, top_k=5, intent_level=intent_level)
+    retrieved = retrieve_documents(query, top_k=5, intent_level=intent_level, tenant_id=tenant_id)
     results = retrieved.get("docs", [])
     retrieve_meta = retrieved.get("meta", {})
     context = _format_docs(results)
@@ -264,6 +266,7 @@ def rewrite_question_node(state: RAGState) -> RAGState:
 
 def retrieve_expanded(state: RAGState) -> RAGState:
     strategy = state.get("expansion_type") or "step_back"
+    tenant_id = state.get("tenant_id")
     emit_rag_step("🔄", "扩展检索 — 用重写后的查询重新召回文档", f"策略: {strategy}")
     results: List[dict] = []
     rerank_applied_any = False
@@ -282,7 +285,7 @@ def retrieve_expanded(state: RAGState) -> RAGState:
 
     if strategy in ("hyde", "complex"):
         hypothetical_doc = state.get("hypothetical_doc") or generate_hypothetical_document(state["question"])
-        retrieved_hyde = retrieve_documents(hypothetical_doc, top_k=5)
+        retrieved_hyde = retrieve_documents(hypothetical_doc, top_k=5, tenant_id=tenant_id)
         results.extend(retrieved_hyde.get("docs", []))
         hyde_meta = retrieved_hyde.get("meta", {})
         emit_rag_step(
@@ -311,7 +314,7 @@ def retrieve_expanded(state: RAGState) -> RAGState:
 
     if strategy in ("step_back", "complex"):
         expanded_query = state.get("expanded_query") or state["question"]
-        retrieved_stepback = retrieve_documents(expanded_query, top_k=5)
+        retrieved_stepback = retrieve_documents(expanded_query, top_k=5, tenant_id=tenant_id)
         results.extend(retrieved_stepback.get("docs", []))
         step_meta = retrieved_stepback.get("meta", {})
         emit_rag_step(
@@ -455,11 +458,12 @@ def build_rag_graph():
 rag_graph = build_rag_graph()
 
 
-def run_rag_graph(question: str, intent_level: str = None) -> dict:
+def run_rag_graph(question: str, intent_level: str = None, tenant_id: int = None) -> dict:
     return rag_graph.invoke({
         "question": question,
         "query": question,
         "intent_level": intent_level,  # v12: 传递意图标签
+        "tenant_id": tenant_id,  # v14: 租户隔离
         "context": "",
         "docs": [],
         "route": None,

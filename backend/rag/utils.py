@@ -346,9 +346,11 @@ def step_back_expand(query: str) -> dict:
     }
 
 #整合「混合检索→重排→自动合并」全流程，提供容错兜底
-def retrieve_documents(query: str, top_k: int = 5, intent_level: str = None) -> Dict[str, Any]:
+def retrieve_documents(query: str, top_k: int = 5, intent_level: str = None, tenant_id: int = None) -> Dict[str, Any]:
     candidate_k = max(top_k * 3, top_k)
     filter_expr = f"(chunk_level == {LEAF_RETRIEVE_LEVEL}) && (is_deleted != true)"
+    if tenant_id is not None:
+        filter_expr += f" && (tenant_id == {tenant_id})"
     try:
         dense_embeddings = _embedding_service.get_embeddings([query])
         dense_embedding = dense_embeddings[0]

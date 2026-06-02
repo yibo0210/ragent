@@ -365,8 +365,12 @@ def rag_specialist_node(state: SupervisorState) -> dict:
     query_intent = state.get("query_intent")
     intent_level = query_intent.get("level") if query_intent else None
 
+    # v14: 传递 tenant_id 用于 Milvus 租户隔离
+    user_ctx = state.get("user_context", {}) or {}
+    tenant_id = user_ctx.get("tenant_id")
+
     # 执行 RAG 检索流水线
-    rag_result = run_rag_graph(user_query, intent_level=intent_level)
+    rag_result = run_rag_graph(user_query, intent_level=intent_level, tenant_id=tenant_id)
     docs = rag_result.get("docs", [])
     context = rag_result.get("context", "")
     rag_trace = rag_result.get("rag_trace", {})
@@ -420,6 +424,10 @@ def web_searcher_node(state: SupervisorState) -> dict:
                 user_query = msg.content
                 break
 
+    # v14: 传递 tenant_id 用于 Milvus 租户隔离
+    user_ctx = state.get("user_context", {}) or {}
+    tenant_id = user_ctx.get("tenant_id")
+
     # v12: CRITICAL 状态下跳过 Tavily 搜索
     from backend.ha.load_monitor import get_load_monitor
     monitor = get_load_monitor()
@@ -433,7 +441,7 @@ def web_searcher_node(state: SupervisorState) -> dict:
     if search_result.get("error") or not search_result.get("results"):
         from backend.rag.pipeline import run_rag_graph
 
-        rag_result = run_rag_graph(user_query)
+        rag_result = run_rag_graph(user_query, tenant_id=tenant_id)
         docs = rag_result.get("docs", [])
         context_rag = rag_result.get("context", "")
         rag_trace = rag_result.get("rag_trace", {})
@@ -644,6 +652,10 @@ def local_graph_search_node(state: SupervisorState) -> dict:
 
     agent_trace = state.get("agent_trace") or {}
 
+    # v14: 传递 tenant_id 用于 Milvus 租户隔离
+    user_ctx = state.get("user_context", {}) or {}
+    tenant_id = user_ctx.get("tenant_id")
+
     time_filter = None
     if agent_trace.get("routing_is_temporal") and agent_trace.get("routing_temporal_year"):
         time_filter = {
@@ -657,13 +669,13 @@ def local_graph_search_node(state: SupervisorState) -> dict:
     if monitor.should_circuit_break_neo4j():
         emit_graph_step("⚡", "负载降级 — CRITICAL 状态，跳过 Neo4j 图谱搜索", agent="local_graph_search")
         from backend.rag.utils import retrieve_documents
-        result = retrieve_documents(user_query, top_k=5)
+        result = retrieve_documents(user_query, top_k=5, tenant_id=tenant_id)
         result["mode"] = "degraded_load_critical"
     else:
         emit_graph_step("🔍", "局部图谱检索 — Milvus向量定位实体 → Neo4j 1-hop外扩邻居", agent="local_graph_search")
         with tracer.start_as_current_span("agent.local_graph_search") as span:
             span.set_attribute("query", user_query[:200])
-            result = safe_graph_search(user_query)
+            result = safe_graph_search(user_query, tenant_id=tenant_id)
 
     emit_graph_step(
         "🔗",
@@ -701,8 +713,12 @@ def global_graph_search_node(state: SupervisorState) -> dict:
                 user_query = msg.content
                 break
 
+    # v14: 传递 tenant_id 用于 Milvus 租户隔离
+    user_ctx = state.get("user_context", {}) or {}
+    tenant_id = user_ctx.get("tenant_id")
+
     emit_graph_step("📊", "全局图谱检索 — Milvus社区摘要向量匹配（Leiden聚类生成）", agent="global_graph_search")
-    result = global_graph_search(user_query)
+    result = global_graph_search(user_query, tenant_id=tenant_id)
     n_summaries = len(result.get("summaries", []))
     emit_graph_step("✅", f"摘要匹配完成 — 命中 {n_summaries} 个相关社区综述", agent="global_graph_search")
 

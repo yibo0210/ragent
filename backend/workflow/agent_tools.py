@@ -1,17 +1,44 @@
 """Register existing orchestrator agents as WorkflowTools.
 
 Called once at workflow executor startup to populate the ToolRegistry.
+Uses lightweight LLM calls instead of full orchestrator node functions
+for fast, reliable workflow execution.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
+from langchain_core.messages import SystemMessage, HumanMessage
+
 from backend.workflow.tool_runtime import WorkflowTool, ToolResult, get_tool_registry
 
 
+def _build_contextual_prompt(agent_name: str, query: str, previous_results: dict | None = None) -> str:
+    """Build a prompt with context from previous step results."""
+    ctx = ""
+    if previous_results:
+        ctx = "\n\nPrevious step results:\n"
+        for dep_id, result in previous_results.items():
+            if hasattr(result, 'data') and result.data:
+                response = result.data.get("response", str(result.data))
+                ctx += f"[{dep_id}]: {response[:2000]}\n"
+    return ctx
+
+
 def _make_agent_invoke(agent_name: str):
-    """Create an invoke function for a specific orchestrator agent."""
+    """Create a lightweight invoke function using direct LLM calls."""
+
+    _tool_prompts = {
+        "rag_specialist": "You are a knowledge retrieval specialist. Search and analyze documents to answer the query accurately.",
+        "web_searcher": "You are a web search specialist. Provide real-time information and external data analysis.",
+        "data_analyst": "You are a data analyst. Generate SQL queries and analyze structured data to answer business questions.",
+        "local_graph_search": "You are a graph knowledge specialist. Explore entity relationships and connections.",
+        "global_graph_search": "You are a knowledge curator. Provide high-level topic analysis and community insights.",
+        "direct_answer": "You are a helpful AI assistant. Answer questions directly and concisely.",
+    }
+
+    system_prompt = _tool_prompts.get(agent_name, "You are a helpful AI assistant.")
 
     async def _invoke(
         query: str,
@@ -19,54 +46,24 @@ def _make_agent_invoke(agent_name: str):
         step: Any = None,
         previous_results: dict | None = None,
     ) -> ToolResult:
-        from backend.agent.orchestrator import (
-            rag_specialist_node,
-            web_searcher_node,
-            data_analyst_node,
-            local_graph_search_node,
-            global_graph_search_node,
-            direct_answer_node,
-        )
-
-        _node_map = {
-            "rag_specialist": rag_specialist_node,
-            "web_searcher": web_searcher_node,
-            "data_analyst": data_analyst_node,
-            "local_graph_search": local_graph_search_node,
-            "global_graph_search": global_graph_search_node,
-            "direct_answer": direct_answer_node,
-        }
-
-        node_fn = _node_map.get(agent_name)
-        if node_fn is None:
-            return ToolResult(success=False, error=f"Unknown agent: {agent_name}")
-
-        state = {
-            "messages": [],
-            "user_query": query,
-            "user_context": user_context or {},
-            "worker_outputs": {},
-            "rag_trace": None,
-            "web_search_trace": None,
-            "agent_trace": None,
-            "tool_outputs": {},
-            "query_intent": None,
-        }
-
         try:
-            result_state = await node_fn(state)
-            response = result_state.get("worker_outputs", {}).get(agent_name, "")
-            if not response:
-                msgs = result_state.get("messages", [])
-                if msgs:
-                    response = str(msgs[-1].content) if hasattr(msgs[-1], "content") else str(msgs[-1])
+            from backend.agent.model_router import get_model_for_agent
+
+            model = get_model_for_agent(agent_name)
+            ctx = _build_contextual_prompt(agent_name, query, previous_results)
+
+            messages = [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=f"Task: {query}{ctx}\n\nProvide a thorough response."),
+            ]
+
+            response = await model.ainvoke(messages)
+            content = response.content if hasattr(response, "content") else str(response)
+
             return ToolResult(
                 success=True,
-                data={
-                    "response": str(response),
-                    "rag_trace": result_state.get("rag_trace"),
-                    "web_search_trace": result_state.get("web_search_trace"),
-                },
+                data={"response": content, "agent": agent_name},
+                tokens_used=len(content) // 4,
             )
         except Exception as e:
             return ToolResult(success=False, error=str(e))

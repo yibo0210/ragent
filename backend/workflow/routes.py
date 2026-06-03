@@ -181,6 +181,7 @@ async def _run_workflow_background(
                     artifact_type=report.artifact_type.value,
                     title=report.title or plan.goal,
                     mime_type=report.mime_type,
+                    content=report.content,
                 ))
                 # Extract structured data from data_analyst results for CSV/Excel
                 for step_id, result in step_results.items():

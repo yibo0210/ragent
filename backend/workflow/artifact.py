@@ -66,6 +66,7 @@ Use professional formatting: headings (##), bullet points, tables where appropri
             title=title,
             artifact_type=ArtifactType.REPORT,
             mime_type="text/markdown",
+            content=content,
         )
 
     async def generate_excel(

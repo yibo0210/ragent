@@ -64,6 +64,7 @@ class WorkflowArtifactRef(BaseModel):
     artifact_type: ArtifactType = ArtifactType.REPORT
     title: str = ""
     mime_type: str = "text/markdown"
+    content: str = ""
     url: str = ""
 
 

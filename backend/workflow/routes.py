@@ -142,7 +142,7 @@ async def _run_workflow_background(
     session_id: str,
     definition_id: int,
 ):
-    """Background task: execute workflow and update DB on completion."""
+    """Background task: execute workflow, generate artifacts, update DB."""
     executor = get_workflow_executor()
     db = SessionLocal()
     try:
@@ -156,14 +156,55 @@ async def _run_workflow_background(
         execution = db.query(WorkflowExecution).filter(
             WorkflowExecution.execution_id == execution_id
         ).first()
-        if execution:
-            execution.status = final_state.get("status", ExecutionStatus.COMPLETED.value)
-            execution.progress = final_state.get("progress", 100.0)
-            execution.completed_at = datetime.now(timezone.utc)
-            execution.state_json = final_state
-            db.commit()
+        if not execution:
+            return
+
+        execution.status = final_state.get("status", ExecutionStatus.COMPLETED.value)
+        execution.progress = final_state.get("progress", 100.0)
+        execution.completed_at = datetime.now(timezone.utc)
+        execution.state_json = final_state
+
+        # Generate artifacts from step results
+        step_results = final_state.get("step_results", {})
+        if step_results:
+            try:
+                from backend.workflow.artifact import get_artifact_generator
+                gen = get_artifact_generator()
+                report = await gen.generate_report(
+                    title=plan.goal,
+                    step_results=step_results,
+                    user_context=user_context,
+                )
+                db.add(WorkflowArtifact(
+                    execution_id=execution.id,
+                    step_id="synthesize",
+                    artifact_type=report.artifact_type.value,
+                    title=report.title or plan.goal,
+                    mime_type=report.mime_type,
+                ))
+                # Extract structured data from data_analyst results for CSV/Excel
+                for step_id, result in step_results.items():
+                    if result.get("success") and result.get("data"):
+                        data = result["data"]
+                        if isinstance(data, dict) and "response" in data:
+                            db.add(WorkflowArtifact(
+                                execution_id=execution.id,
+                                step_id=step_id,
+                                artifact_type="report",
+                                title=f"Step: {step_id}",
+                                mime_type="text/plain",
+                                content=str(data["response"])[:10000],
+                            ))
+            except Exception as e:
+                from backend.observability import get_logger
+                get_logger("ragent.workflow").warning(
+                    "artifact_generation_failed", error=str(e)
+                )
+
+        db.commit()
 
     except Exception as e:
+        db.rollback()
         execution = db.query(WorkflowExecution).filter(
             WorkflowExecution.execution_id == execution_id
         ).first()

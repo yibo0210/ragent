@@ -220,6 +220,33 @@
                         </div>
                     </div>
 
+                    <!-- Workflow History -->
+                    <div class="wf-history-card">
+                        <div class="wf-history-header">
+                            <h3><i class="fas fa-clock-rotate-left"></i> 历史记录</h3>
+                            <button class="btn-ghost" @click="wfLoadHistory"><i class="fas fa-rotate"></i> 刷新</button>
+                        </div>
+                        <div v-if="wfHistory.length === 0" class="card-empty" style="padding:20px">
+                            <span>暂无执行记录</span>
+                        </div>
+                        <div v-else class="wf-history-list">
+                            <div v-for="h in wfHistory" :key="h.execution_id" class="wf-history-item"
+                                @click="wfViewHistory(h)">
+                                <div class="wf-history-status" :class="'status-' + h.status">
+                                    <i v-if="h.status === 'completed'" class="fas fa-circle-check"></i>
+                                    <i v-else-if="h.status === 'failed'" class="fas fa-circle-xmark"></i>
+                                    <i v-else-if="h.status === 'running'" class="fas fa-spinner fa-spin"></i>
+                                    <i v-else class="fas fa-circle"></i>
+                                </div>
+                                <div class="wf-history-info">
+                                    <div class="wf-history-id">{{ h.execution_id }}</div>
+                                    <div class="wf-history-meta">{{ h.status }} · {{ Math.round(h.progress) }}%</div>
+                                </div>
+                                <i class="fas fa-chevron-right wf-history-arrow"></i>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Artifact Content Modal -->
                     <div v-if="wfArtifactModal" class="hitl-overlay" @click.self="wfArtifactModal = null">
                         <div class="hitl-modal" style="max-width:800px;max-height:80vh;overflow-y:auto">
@@ -341,7 +368,7 @@
             </div>
 
             <!-- Content Area -->
-            <div v-show="activeNav !== 'settings'" class="content-area">
+            <div v-show="activeNav !== 'settings' && activeNav !== 'workflow'" class="content-area">
 
             <!-- Chat View -->
             <div v-show="activeNav !== 'settings'" class="chat-view">

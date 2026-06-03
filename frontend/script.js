@@ -57,6 +57,7 @@ createApp({
             wfArtifacts: [],
             wfPollTimer: null,
             wfArtifactModal: null,
+            wfHistory: [],
         };
     },
     mounted() {
@@ -960,11 +961,45 @@ createApp({
             text = String(text);
             return text.length > maxLen ? text.substring(0, maxLen) + '...' : text;
         },
+
+        async wfLoadHistory() {
+            try {
+                const res = await this._authFetch('/workflows');
+                if (res.ok) {
+                    const data = await res.json();
+                    this.wfHistory = data.executions || [];
+                }
+            } catch (e) { /* ignore */ }
+        },
+
+        wfViewHistory(h) {
+            this.wfReset();
+            this.wfExecutionId = h.execution_id;
+            this.wfStatus = h.status;
+            this.wfProgress = h.progress;
+            this.wfExecuting = h.status === 'running';
+            if (h.status === 'completed') {
+                this.wfStatusText = '执行完成';
+                this.wfLoadArtifacts();
+            } else if (h.status === 'running') {
+                this.wfStatusText = '执行中...';
+                this.wfPollStatus();
+            } else if (h.status === 'failed') {
+                this.wfStatusText = '执行失败';
+                this.wfErrorMessage = h.error_message || '';
+            }
+            this.$nextTick(() => {
+                document.querySelector('.wf-goal-card')?.scrollIntoView({ behavior: 'smooth' });
+            });
+        },
     },
     watch: {
         messages: {
             handler() { this.$nextTick(() => this.scrollToBottom()); },
             deep: true
+        },
+        activeNav(val) {
+            if (val === 'workflow') this.wfLoadHistory();
         }
     }
 }).mount('#app');

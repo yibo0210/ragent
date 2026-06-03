@@ -878,3 +878,25 @@ body {
 .wf-artifact-info { flex: 1; }
 .wf-artifact-title { font-weight: 600; font-size: 14px; }
 .wf-artifact-meta { font-size: 12px; color: var(--text-secondary); }
+
+.wf-history-card {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 14px; padding: 20px; margin-bottom: 20px;
+}
+.wf-history-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.wf-history-header h3 { font-size: 16px; margin: 0; }
+.wf-history-list { display: flex; flex-direction: column; gap: 6px; }
+.wf-history-item {
+  display: flex; align-items: center; gap: 12px; padding: 10px 14px;
+  border: 1px solid var(--border); border-radius: 10px; cursor: pointer;
+  transition: background 0.15s;
+}
+.wf-history-item:hover { background: var(--bg); }
+.wf-history-status { font-size: 20px; width: 28px; text-align: center; flex-shrink: 0; }
+.wf-history-status.status-completed { color: #22c55e; }
+.wf-history-status.status-failed { color: #ef4444; }
+.wf-history-status.status-running { color: var(--accent); }
+.wf-history-info { flex: 1; min-width: 0; }
+.wf-history-id { font-weight: 600; font-size: 13px; }
+.wf-history-meta { font-size: 12px; color: var(--text-secondary); }
+.wf-history-arrow { color: var(--text-secondary); font-size: 12px; }

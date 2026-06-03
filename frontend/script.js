@@ -491,6 +491,11 @@ createApp({
                 const fd = new FormData();
                 fd.append('file', this.selectedFile);
                 const response = await this._authFetch('/documents/upload', { method: 'POST', body: fd });
+                if (response.status === 401) {
+                    this.showToast('登录已过期，请重新登录', 'error', 3000);
+                    this.handleLogout();
+                    return;
+                }
                 if (!response.ok) {
                     const e = await response.json().catch(() => ({}));
                     throw new Error(e.detail || 'Upload failed');

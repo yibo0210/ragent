@@ -239,7 +239,7 @@
                                     <i v-else class="fas fa-circle"></i>
                                 </div>
                                 <div class="wf-history-info">
-                                    <div class="wf-history-id">{{ h.execution_id }}</div>
+                                    <div class="wf-history-id">{{ h.goal || h.execution_id }}</div>
                                     <div class="wf-history-meta">{{ h.status }} · {{ Math.round(h.progress) }}%</div>
                                 </div>
                                 <i class="fas fa-chevron-right wf-history-arrow"></i>

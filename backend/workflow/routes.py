@@ -252,6 +252,7 @@ async def get_workflow_status(
             step_results=state.get("step_results", {}),
             artifacts=artifacts,
             error_message=execution.error_message,
+            goal=(execution.definition.goal if execution.definition else ""),
         )
     finally:
         db.close()
@@ -314,6 +315,7 @@ async def list_workflows(
                     step_results=(e.state_json or {}).get("step_results", {}),
                     artifacts=[],
                     error_message=e.error_message,
+                    goal=(e.definition.goal if e.definition else ""),
                 )
                 for e in executions
             ]

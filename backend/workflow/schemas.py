@@ -126,6 +126,7 @@ class WorkflowStatusResponse(BaseModel):
     step_results: dict[str, Any] = Field(default_factory=dict)
     artifacts: list[WorkflowArtifactRef] = Field(default_factory=list)
     error_message: Optional[str] = None
+    goal: str = ""
 
 
 class WorkflowListResponse(BaseModel):

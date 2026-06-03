@@ -29,6 +29,12 @@ def get_db():
     finally:
         db.close()
 
-# 初始化表
+# Import all model modules so Base.metadata sees them (for FK resolution + Alembic)
+import backend.auth.models  # noqa: F401, E402
+import backend.billing.models  # noqa: F401, E402
+import backend.storage.models  # noqa: F401, E402
+import backend.workflow.models  # noqa: F401, E402
+
+
 def init_db():
     Base.metadata.create_all(bind=engine)

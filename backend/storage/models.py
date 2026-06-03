@@ -137,5 +137,3 @@ class GraphCheckpointWrite(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 
 
-# Make workflow models discoverable by Alembic
-from backend.workflow.models import WorkflowDefinition, WorkflowExecution, WorkflowArtifact  # noqa: F401, E402

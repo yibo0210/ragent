@@ -66,15 +66,15 @@ createApp({
         if (this.authToken) this.loadSessions();
     },
 
-    // Auth helper: common fetch with Authorization header
-    _authFetch(url, options = {}) {
-        const headers = options.headers || {};
-        if (this.authToken) {
-            headers['Authorization'] = 'Bearer ' + this.authToken;
-        }
-        return fetch(url, { ...options, headers });
-    },
     methods: {
+        // Auth helper: common fetch with Authorization header
+        _authFetch(url, options = {}) {
+            const headers = options.headers || {};
+            if (this.authToken) {
+                headers['Authorization'] = 'Bearer ' + this.authToken;
+            }
+            return fetch(url, { ...options, headers });
+        },
         configureMarked() {
             const renderer = new marked.Renderer();
             renderer.code = function(code, language) {

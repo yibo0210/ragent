@@ -74,6 +74,14 @@ def create_app() -> FastAPI:
     from backend.billing.routes import router as billing_router
     app.include_router(billing_router)
 
+    # --- v16 Workflow routes ---
+    try:
+        from backend.workflow.routes import router as workflow_router
+        app.include_router(workflow_router)
+    except Exception as e:
+        from backend.observability import get_logger
+        get_logger("ragent.app").warning("workflow_routes_init_failed", error=str(e))
+
     # --- v5.0 可观测性 (must be after router + before static mount) ---
     from backend.observability import init_logging, init_tracing, init_metrics
     init_logging()

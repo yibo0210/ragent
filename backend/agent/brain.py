@@ -596,6 +596,16 @@ async def chat_with_agent_stream(user_text: str, session_id: str = "default_sess
                             },
                         })
 
+                    # --- v16: Workflow node events (if workflow graph runs in same stream) ---
+                    elif node_name in ("init", "execute_step", "finalize", "handle_error"):
+                        if update is not None:
+                            await output_queue.put({
+                                "type": "workflow_event",
+                                "node": node_name,
+                                "status": update.get("status", ""),
+                                "progress": update.get("progress", 0),
+                            })
+
         except Exception as e:
             await output_queue.put({"type": "error", "content": str(e)})
         finally:

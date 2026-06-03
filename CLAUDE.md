@@ -95,6 +95,8 @@ v13: 增量图聚类引擎 — 文档摄入后自动触发局部补丁（新节�
 
 **Multi-Tenant RBAC** (v14): OAuth2/JWT 鉴权中间件提取 `tenant_id` + `user_id` + `role`。`SupervisorState.user_context` 透传给所有 Worker。Milvus pre-filtering (`expr = "tenant_id == X"`) 实现向量通道硬隔离。Neo4j MERGE key 扩展为 `{name, tenant_id}` + Cypher 子图约束实现图通道隔离。MySQL `tenant_id` FK 实现行级隔离。Data Analyst SQL 生成注入 tenant 约束 + `execute_sql` 安全检查双重防护。
 
+**Agent Workflow Platform** (v16): 新增 Workflow 子系统（独立 LangGraph），支持 Goal → Plan → Execute → Deliver 完整闭环。WorkflowPlanner 通过 LLM 将自然语言目标拆解为 DAG 执行计划，WorkflowExecutor 按依赖关系串行/并行执行步骤。6 个现有 Agent 统一抽象为 WorkflowTool，通过 ToolRegistry 注册。Artifact 系统产出 Report/Excel/Chart/CSV 等交付物并持久化到 MySQL。前端新增任务工作流面板，支持目标输入、DAG 可视化、进度轮询、产物查看。工作流状态通过 MySQL Checkpointer 持久化，支持断点续跑。
+
 ### Key Files
 
 
@@ -173,6 +175,15 @@ v13: 增量图聚类引擎 — 文档摄入后自动触发局部补丁（新节�
 | `backend/billing/audit.py` | Audit log writer + AuditContext context manager |
 | `backend/billing/middleware.py` | FastAPI rate-limit middleware (429 on exceeded) |
 | `backend/billing/routes.py` | /billing/usage + /billing/audit API endpoints |
+| `backend/workflow/__init__.py` | Workflow 子系统入口：Planner, Executor, ArtifactGenerator 统一导出 |
+| `backend/workflow/models.py` | WorkflowDefinition, WorkflowExecution, WorkflowArtifact ORM 模型 |
+| `backend/workflow/schemas.py` | WorkflowStep, WorkflowPlan, ExecutionStatus, ArtifactType Pydantic |
+| `backend/workflow/planner.py` | WorkflowPlanner: LLM 将自然语言目标拆解为 DAG 执行计划 |
+| `backend/workflow/executor.py` | WorkflowExecutor: LangGraph DAG 执行引擎（串行+并行） |
+| `backend/workflow/tool_runtime.py` | WorkflowTool 统一抽象 + ToolRegistry 注册中心 |
+| `backend/workflow/agent_tools.py` | 将 6 个 Agent 注册为 WorkflowTool（轻量 LLM 调用） |
+| `backend/workflow/artifact.py` | ArtifactGenerator: Report/Excel/Chart/CSV 交付物生成 |
+| `backend/workflow/routes.py` | /workflows/plan, /execute, /status, /artifacts API |
 | `tests/test_token_tracker.py` | Token usage + rate limiter tests |
 | `tests/test_rate_limiter.py` | Rate limiter + SLA rule tests |
 | `tests/test_audit.py` | Audit logger + context manager tests |
@@ -291,3 +302,10 @@ v13: 增量图聚类引擎 — 文档摄入后自动触发局部补丁（新节�
 - **Checkpointer pending_writes**: `_load_writes` must return `(task_id, channel, value)` triples for LangGraph 0.2+ compatibility. Old format `(channel, value)` causes "not enough values to unpack (expected 3, got 2)".
 - **Milvus pymilvus 2.5 API**: `client.search()` uses `search_params` not `param`. Silent 0-result failure with old param name.
 - **Milvus gRPC reconnect**: `_ensure_connected()` calls `get_load_state()` before each query; resets client on failure to prevent "closed channel" errors.
+- **v16 Workflow 独立 LangGraph**: WorkflowExecutor 使用独立 StateGraph（与 Supervisor 图并行），通过 MySQL Checkpointer 持久化，支持断点续跑。节点：init → execute_step ⇄ finalize/error。
+- **v16 WorkflowTool 统一抽象**: 6 个 Agent（rag_specialist 等）通过 `WorkflowTool.from_agent()` 包装，MCP 工具通过 `from_mcp()` 包装。ToolRegistry 单例管理，Executor 按 step.tool 名称查找并调用。
+- **v16 DAG 依赖解析**: `_execute_step_node` 每轮找出所有依赖已满足的步骤并执行，独立步骤自动并行。依赖通过 `step.dependencies`（step_id 列表）声明，前序结果通过 `previous_results` 传递。
+- **v16 轻量 Agent 调用**: `agent_tools.py` 使用直接 LLM 调用（不走完整 agent node 函数），每个 step 通过 `model.ainvoke()` 快速获取结果，避免 agent node 的复杂状态依赖和长耗时。
+- **v16 Artifact 持久化**: `_run_workflow_background` 执行完成后调用 `ArtifactGenerator` 生成 Report，并将内容写入 `workflow_artifacts` 表。前端通过轮询 `/status` 获取进度，完成后通过 `/artifacts` 获取产物。
+- **v16 前端 Workflow 面板**: Vue 3 组件实现 Goal 输入 → Plan DAG 可视化 → Execute 进度轮询 → Artifact 查看。历史记录列表自动加载，点击可回溯查看过往执行。
+- **v16 upsert_document_index 异步管线修复**: 相同 hash 但 chunk_count 不同时（流式管线先写 0 后更新实际值），不再跳过而是更新 chunk_count。Stream consumer 注入 tenant_id 到 doc dicts 避免 FK 约束失败。

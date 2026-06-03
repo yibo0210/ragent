@@ -22,18 +22,19 @@
 15. [自适应检索与负载降级 (v12)](#15-自适应检索与负载降级-v12)
 16. [多租户 RBAC 与数据隔离 (v14)](#16-多租户-rbac-与数据隔离-v14)
 17. [SaaS 计量、限流与审计 (v15)](#17-saas-计量限流与审计-v15)
-18. [常见面试问题与回答](#18-常见面试问题与回答)
-18. [代码级深度追问](#18-代码级深度追问高频追问准备)
-19. [实战调试场景](#19-实战调试场景behavioral-questions)
-20. [系统设计追问](#20-系统设计追问system-design)
-21. [高频概念追问](#21-高频概念追问)
-22. [LLM 基础原理](#22-llm-基础原理必考)
-23. [Agent 架构模式](#23-agent-架构模式高频)
-24. [Embedding 模型原理](#24-embedding-模型原理必考)
-25. [高级 RAG 模式](#25-高级-rag-模式高频)
-26. [生产工程](#26-生产工程实战)
-27. [安全与防护](#27-安全与防护生产必问)
-28. [面试技巧总结](#28-面试技巧总结)
+18. [Agent Workflow Platform (v16)](#18-agent-workflow-platform-v16)
+19. [常见面试问题与回答](#19-常见面试问题与回答)
+20. [代码级深度追问](#20-代码级深度追问高频追问准备)
+21. [实战调试场景](#21-实战调试场景behavioral-questions)
+22. [系统设计追问](#22-系统设计追问system-design)
+23. [高频概念追问](#23-高频概念追问)
+24. [LLM 基础原理](#24-llm-基础原理必考)
+25. [Agent 架构模式](#25-agent-架构模式高频)
+26. [Embedding 模型原理](#26-embedding-模型原理必考)
+27. [高级 RAG 模式](#27-高级-rag-模式高频)
+28. [生产工程](#28-生产工程实战)
+29. [安全与防护](#29-安全与防护生产必问)
+30. [面试技巧总结](#30-面试技巧总结)
 
 ---
 
@@ -1417,7 +1418,201 @@ class AuditContext:
 
 ---
 
-## 17. 常见面试问题与回答
+## 18. Agent Workflow Platform (v16)
+
+### 18.1 问题背景
+
+v15 的 Ragent AI 是一个知识问答平台——用户提问，Agent 回答。但在企业场景中，用户的需求已经从"找信息"演变为"完成业务任务"。
+
+例如，"分析 Q2 销售数据并生成报告"——这需要：
+- 查询数据库获取原始数据
+- 对数据进行统计分析
+- 生成可视化图表
+- 撰写分析报告
+- 打包为可交付物
+
+这不是一个问答能解决的，需要**多步工作流编排**。
+
+### 18.2 设计目标
+
+将 Ragent AI 从 **Enterprise Knowledge Platform** 升级为 **Enterprise Agent Workflow Platform**，实现：
+
+```
+Goal → Plan → Execute → Deliver
+```
+
+核心新增三个能力：
+1. **Workflow Planner** — 自然语言目标 → DAG 执行计划
+2. **Workflow Executor** — DAG 引擎按依赖执行（串行+并行）
+3. **Artifact System** — Report/Excel/Chart/CSV 交付物生成
+
+### 18.3 架构设计
+
+```
+POST /workflows/plan
+      │
+┌─────▼──────────────────────┐
+│  WorkflowPlanner           │
+│  LLM 拆解 goal → DAG Steps │
+│  (System Prompt + JSON)    │
+└─────┬──────────────────────┘
+      │ WorkflowPlan {steps, reasoning}
+      ▼
+POST /workflows/execute
+      │
+┌─────▼──────────────────────┐
+│  WorkflowExecutor          │
+│  独立 LangGraph StateGraph │
+│                            │
+│  init → execute_step       │
+│           │                │
+│     ┌─────┴─────┐          │
+│   step_1    step_2 (并行)  │
+│     │         │            │
+│     └────┬────┘            │
+│        step_3              │
+│           │                │
+│       finalize             │
+└─────┬──────────────────────┘
+      │ step_results {step_id: ToolResult}
+      ▼
+ArtifactGenerator
+      │
+┌─────▼──────────────────────┐
+│  Report (LLM Markdown)     │
+│  Excel (openpyxl)          │
+│  Chart (Echarts JSON)      │
+│  CSV                       │
+└────────────────────────────┘
+      │ 持久化到 workflow_artifacts
+      ▼
+  GET /workflows/{id}/artifacts
+```
+
+### 18.4 关键实现细节
+
+#### WorkflowPlanner
+
+```python
+# backend/workflow/planner.py
+class WorkflowPlanner:
+    async def plan(self, goal: str, tenant_id: int, user_id: int) -> WorkflowPlan:
+        model = get_model_for_agent("supervisor")
+        response = await model.ainvoke([
+            SystemMessage(content=_PLANNER_SYSTEM_PROMPT),
+            HumanMessage(content=f"Goal: {goal}"),
+        ])
+        # Extract JSON from LLM response via regex
+        plan_dict = json.loads(re.search(r"\{[\s\S]*\}", content).group(0))
+        return WorkflowPlan(goal=goal, steps=steps, reasoning=...)
+```
+
+Planner 通过 System Prompt 告诉 LLM 可用的 6 个工具及其能力，要求输出 JSON 格式的步骤列表（含 step_id / tool / query / dependencies）。
+
+#### WorkflowExecutor
+
+```python
+# backend/workflow/executor.py
+class WorkflowExecutor:
+    async def _execute_step_node(self, state: WorkflowGraphState) -> dict:
+        plan = WorkflowPlan(**state["plan"])
+        completed = set(state.get("completed_steps", []))
+        
+        # 找出所有依赖已满足的步骤
+        ready_steps = [s for s in plan.steps 
+                       if s.step_id not in completed 
+                       and all(d in completed for d in s.dependencies)]
+        
+        # 执行所有就绪步骤（并行）
+        for step in ready_steps:
+            tool = get_tool_registry().get(step.tool)
+            result = await tool.invoke(query=step.query, ...)
+            state["step_results"][step.step_id] = result.to_dict()
+            state["completed_steps"].append(step.step_id)
+        
+        # 循环直到所有步骤完成
+```
+
+关键点：依赖检测驱动，每轮找出就绪步骤并批量执行，独立步骤自动并行。
+
+#### WorkflowTool 抽象
+
+6 个 Agent 通过 `WorkflowTool.from_agent()` 注册：
+
+```python
+# backend/workflow/agent_tools.py
+def _make_agent_invoke(agent_name: str):
+    async def _invoke(query, ...):
+        model = get_model_for_agent(agent_name)
+        response = await model.ainvoke([
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=f"Task: {query}"),
+        ])
+        return ToolResult(success=True, data={"response": response.content})
+    return _invoke
+```
+
+使用轻量 LLM 调用而非完整 agent node 函数，避免 agent node 对 SupervisorState 的复杂依赖和长耗时。
+
+#### Artifact 持久化
+
+```python
+# backend/workflow/routes.py _run_workflow_background
+final_state = await executor.execute(plan, ...)
+# 生成报告
+report = await gen.generate_report(title=plan.goal, step_results=...)
+# 持久化
+db.add(WorkflowArtifact(execution_id=..., content=report.content, ...))
+# 每个 step 的结果也保存
+for step_id, result in step_results.items():
+    db.add(WorkflowArtifact(step_id=step_id, content=str(result.data), ...))
+```
+
+### 18.5 数据模型
+
+| 表 | 用途 | 关键字段 |
+|---|---|---|
+| `workflow_definitions` | 存储 Planner 生成的执行计划 | goal, steps_json, reasoning, tenant_id |
+| `workflow_executions` | 运行时执行状态 | execution_id, status, progress, state_json |
+| `workflow_artifacts` | 执行产物持久化 | artifact_type, title, content, file_path |
+
+### 18.6 API 设计
+
+| 端点 | 方法 | 用途 |
+|---|---|---|
+| `/workflows/plan` | POST | 输入 goal → LLM 生成 WorkflowPlan |
+| `/workflows/execute` | POST | 传入 definition_id → 后台异步执行 |
+| `/workflows/{id}/status` | GET | 轮询执行状态和进度 |
+| `/workflows/{id}/artifacts` | GET | 获取交付物列表和内容 |
+| `/workflows` | GET | 列出当前租户的所有执行记录 |
+
+### 18.7 前端 Workflow 面板
+
+Vue 3 实现的完整工作流界面：
+
+1. **目标输入** — textarea + 生成按钮（Ctrl+Enter）
+2. **Plan DAG 可视化** — 步骤卡片展示（序号/工具名/查询/依赖），依赖关系通过缩进和标签体现
+3. **执行进度** — 进度条 + 百分比 + 状态文字，每 1.5s 轮询 `/status`
+4. **产物查看** — 模态框渲染 Markdown 报告内容
+5. **历史记录** — 自动加载 `/workflows`，点击回溯查看
+
+### 18.8 与 v8 Planner 的区别
+
+| | v8 Planner | v16 Workflow |
+|---|---|---|
+| **触发** | Supervisor 判断复杂查询后自动触发 | 用户主动输入业务目标 |
+| **步骤执行** | Send fan-out 到多个 Agent 同时执行 | DAG 依赖驱动的有序执行 |
+| **输出** | 文本回答（合成结果） | 多类型交付物（Report/Excel/Chart） |
+| **持久化** | 通过 GraphCheckpoint 保存状态 | 独立 DB 表 + Artifact 存储 |
+| **可回溯** | 无 | 历史记录列表 + 产物长期保存 |
+
+### 18.9 面试话术
+
+> "v16 将 Ragent AI 从知识问答平台升级为 Agent 工作流平台。核心做了三件事：一是 WorkflowPlanner，用户输入业务目标，LLM 自动拆解成 DAG 执行计划并分析步骤依赖；二是 WorkflowEngine，基于 LangGraph 构建了独立的状态图，按依赖关系驱动步骤执行，独立步骤自动并行，状态通过 MySQL Checkpointer 持久化支持断点续跑；三是 Artifact 系统，执行完成后自动调用 LLM 生成 Markdown 报告，同时支持 Excel、Echarts 图表、CSV 等交付物，全部持久化到数据库。这体现了 Agent Planning、Task Decomposition、DAG Orchestration 三个 Agent 岗位最核心的能力。"
+
+---
+
+## 19. 常见面试问题与回答
 
 ### Q1: 介绍一下你的项目？
 
@@ -1665,7 +1860,7 @@ RAG = Retrieval Augmented Generation，检索增强生成。核心思想是**让
 
 ---
 
-## 19. 代码级深度追问（高频追问准备）
+## 20. 代码级深度追问（高频追问准备）
 
 ### Q16: Supervisor 的 JSON 解析是怎么做的？为什么不用 with_structured_output？
 
@@ -1967,7 +2162,7 @@ graph.add_edge("data_analyst", END)   # 跳过 critique
 
 ---
 
-## 20. 实战调试场景（Behavioral Questions）
+## 21. 实战调试场景（Behavioral Questions）
 
 ### Q24: 如果用户反馈"回答不准确"，你怎么排查？
 
@@ -2040,7 +2235,7 @@ graph.add_edge("data_analyst", END)   # 跳过 critique
 
 ---
 
-## 21. 系统设计追问（System Design）
+## 22. 系统设计追问（System Design）
 
 ### Q27: 如果让你重新设计这个系统，你会做什么不同的决定？
 
@@ -2083,7 +2278,7 @@ graph.add_edge("data_analyst", END)   # 跳过 critique
 
 ---
 
-## 22. 高频概念追问
+## 23. 高频概念追问
 
 ### Q30: RRF 和 BM25 的区别？
 
@@ -2159,7 +2354,7 @@ log.info("user_logged_in", user_id=123)
 
 ---
 
-## 23. LLM 基础原理（必考）
+## 24. LLM 基础原理（必考）
 
 ### Q35: Transformer 的核心机制是什么？
 
@@ -2249,7 +2444,7 @@ CoT Prompt：Q: 8+5×2=? A: 先算乘法 5×2=10，再算加法 8+10=18
 
 ---
 
-## 24. Agent 架构模式（高频）
+## 25. Agent 架构模式（高频）
 
 ### Q39: ReAct 模式是什么？你的系统和它有什么关系？
 
@@ -2364,7 +2559,7 @@ LangGraph 的 StateGraph 保证每个节点的执行是原子性的——一个�
 
 ---
 
-## 25. Embedding 模型原理（必考）
+## 26. Embedding 模型原理（必考）
 
 ### Q43: Embedding 模型是怎么训练的？
 
@@ -2424,7 +2619,7 @@ sparse_embedding = embedding_service.get_sparse_embedding(query)  # BM25
 
 ---
 
-## 26. 高级 RAG 模式（高频）
+## 27. 高级 RAG 模式（高频）
 
 ### Q46: Corrective RAG (CRAG) 是什么？你的系统有类似机制吗？
 
@@ -2502,7 +2697,7 @@ Adaptive RAG 根据查询特征动态调整检索策略：
 
 ---
 
-## 27. 生产工程（实战）
+## 28. 生产工程（实战）
 
 ### Q50: 如何控制 LLM API 成本？
 
@@ -2585,7 +2780,7 @@ Critique：~1000 tokens（verification）
 
 ---
 
-## 28. 安全与防护（生产必问）
+## 29. 安全与防护（生产必问）
 
 ### Q53: 如何防止 Agent 执行危险操作？
 
@@ -2637,7 +2832,7 @@ Critique：~1000 tokens（verification）
 
 ---
 
-## 29. 面试技巧总结
+## 30. 面试技巧总结
 
 ### 回答问题的 STAR 框架
 

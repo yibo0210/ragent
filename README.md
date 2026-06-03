@@ -446,6 +446,19 @@ Neo4j Full Graph
 | **Session List Optimization** | Batch queries (`GROUP BY` + `func.count`/`func.min`) instead of N+1 per-session fetches |
 | **Test Coverage** | 65 tests covering auth, billing, rate limiting, audit, load monitor, data analyst SQL safety, SLA degradation |
 
+### Agent Workflow Platform (v16.0)
+
+| Feature | Description |
+|---------|-------------|
+| **Workflow Planner** | `backend/workflow/planner.py` — LLM 将自然语言目标拆解为 DAG 执行计划（WorkflowPlan），自动分析步骤依赖关系 |
+| **Workflow Executor** | `backend/workflow/executor.py` — 独立 LangGraph DAG 执行引擎，串行+并行，MySQL Checkpointer 持久化支持断点续跑 |
+| **WorkflowTool Abstraction** | `backend/workflow/tool_runtime.py` — 统一工具抽象层，6 个 Agent 注册到 ToolRegistry，轻量 LLM 调用替代完整 agent node |
+| **Artifact System** | `backend/workflow/artifact.py` — Report(Markdown LLM)、Excel(openpyxl)、Chart(Echarts)、CSV 交付物，持久化到 `workflow_artifacts` |
+| **Workflow API** | `POST /workflows/plan`, `POST /workflows/execute`, `GET /workflows/{id}/status`, `GET /workflows/{id}/artifacts` |
+| **Frontend Panel** | Vue 3 任务工作流面板：目标输入→Plan DAG 可视化→执行进度条→产物查看→历史记录回溯 |
+| **Model** | 3 张新表：`workflow_definitions`, `workflow_executions`, `workflow_artifacts`；Alembic 管理迁移 |
+| **Tests** | 19 个 workflow 单元测试（tool runtime + planner + executor），23 total 全绿 |
+
 ---
 
 ## Tech Stack
@@ -1084,6 +1097,16 @@ This will:
 - [x] Billing API: `GET /billing/usage` (token summary) + `GET /billing/audit` (paginated audit logs)
 - [x] HITL webhook: POST to `HITL_WEBHOOK_URL` on interrupt events for admin notification
 - [x] 40 tests passing (v14+v15 combined: 28 billing + 12 privilege escalation)
+
+### v16.0 — Agent Workflow Platform ✓
+
+- [x] Workflow Planner: LLM 目标拆解为 DAG 执行计划（`POST /workflows/plan`）
+- [x] Workflow Executor: LangGraph DAG 引擎，串行+并行执行（`POST /workflows/execute`）
+- [x] WorkflowTool 抽象: 6 Agent 统一注册为 WorkflowTool，轻量 LLM 调用
+- [x] Artifact System: Report/Excel/Chart/CSV 交付物生成 + 持久化
+- [x] Workflow API: plan/execute/status/artifacts/list 全链路
+- [x] Frontend Panel: 任务工作流标签页，DAG 可视化，进度条，产物查看，历史记录
+- [x] 23 tests passing (19 workflow + 4 audit)
 
 ### v7.x — Planned
 

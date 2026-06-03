@@ -65,6 +65,7 @@ python_functions = ["test_*"]
 addopts = "-v --tb=short --strict-markers"
 markers = [
     "evaluation: 评测相关测试（需要真实 Milvus/LLM 连接）",
+    "asyncio: asyncio-based async tests",
 ]
 
 [project.optional-dependencies]

@@ -43,6 +43,10 @@
 
             <!-- Quick Actions -->
             <div class="sidebar-quick-actions">
+                <button class="sidebar-bottom-btn" @click="activeNav = 'workflow'; wfReset()" :class="{active: activeNav === 'workflow'}">
+                    <i class="fas fa-diagram-project"></i>
+                    <span class="nav-label">任务工作流</span>
+                </button>
                 <button class="sidebar-bottom-btn" @click="handleSettings" :class="{active: activeNav === 'settings'}">
                     <i class="fas fa-gear"></i>
                     <span class="nav-label">知识库管理</span>
@@ -124,6 +128,109 @@
                             </button>
                             <div v-if="authError" class="auth-error">{{ authError }}</div>
                         </form>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Workflow Panel -->
+            <div v-if="activeNav === 'workflow'" class="workflow-view">
+                <div class="workflow-container">
+                    <div class="workflow-nav">
+                        <button class="icon-btn" @click="activeNav = 'newChat'" title="返回对话">
+                            <i class="fas fa-arrow-left"></i>
+                        </button>
+                        <h2>任务工作流</h2>
+                        <span class="workflow-desc">输入业务目标，自动拆解为多步执行计划</span>
+                    </div>
+
+                    <!-- Goal Input -->
+                    <div class="wf-goal-card">
+                        <textarea v-model="wfGoal" placeholder="输入业务目标，例如：分析Q2销售数据并生成报告..." rows="3"
+                            @keydown.ctrl.enter="wfPlan" :disabled="wfPlanning"></textarea>
+                        <div class="wf-goal-actions">
+                            <button class="btn-primary" @click="wfPlan" :disabled="wfPlanning || !wfGoal.trim()">
+                                <i v-if="wfPlanning" class="fas fa-spinner fa-spin"></i>
+                                {{ wfPlanning ? '规划中...' : '生成执行计划' }}
+                            </button>
+                            <span class="wf-hint">Ctrl+Enter 快捷发送</span>
+                        </div>
+                        <div v-if="wfPlanError" class="wf-error">{{ wfPlanError }}</div>
+                    </div>
+
+                    <!-- Plan Display -->
+                    <div v-if="wfPlanData" class="wf-plan-card">
+                        <div class="wf-plan-header">
+                            <h3><i class="fas fa-diagram-project"></i> 执行计划</h3>
+                            <span class="wf-plan-meta">{{ wfPlanData.steps.length }} 步 · 预估 {{ wfPlanData.estimated_tokens }} tokens</span>
+                        </div>
+                        <div class="wf-plan-reasoning" v-if="wfPlanData.reasoning">
+                            <i class="fas fa-lightbulb"></i> {{ wfPlanData.reasoning }}
+                        </div>
+                        <div class="wf-steps">
+                            <div v-for="(step, si) in wfPlanData.steps" :key="step.step_id" class="wf-step-card"
+                                :class="{ active: wfCurrentStep === step.step_id, done: wfCompletedSteps.includes(step.step_id), fail: wfStepErrors[step.step_id] }">
+                                <div class="wf-step-head">
+                                    <span class="wf-step-num">{{ si + 1 }}</span>
+                                    <span class="wf-step-name">{{ step.name }}</span>
+                                    <span class="wf-step-tool">{{ step.tool }}</span>
+                                    <span v-if="wfCompletedSteps.includes(step.step_id)" class="wf-step-check"><i class="fas fa-check-circle"></i></span>
+                                    <span v-if="wfStepErrors[step.step_id]" class="wf-step-fail"><i class="fas fa-times-circle"></i></span>
+                                    <span v-if="wfCurrentStep === step.step_id && !wfCompletedSteps.includes(step.step_id)" class="wf-step-spin"><i class="fas fa-spinner fa-spin"></i></span>
+                                </div>
+                                <div class="wf-step-query">{{ step.query }}</div>
+                                <div v-if="step.dependencies && step.dependencies.length" class="wf-step-deps">
+                                    依赖: {{ step.dependencies.join(', ') }}
+                                </div>
+                                <div v-if="wfStepResults[step.step_id]" class="wf-step-result">
+                                    <pre>{{ truncate(wfStepResults[step.step_id], 500) }}</pre>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="wf-plan-actions">
+                            <button class="btn-primary" @click="wfExecute" :disabled="wfExecuting || !wfPlanData">
+                                <i v-if="wfExecuting" class="fas fa-spinner fa-spin"></i>
+                                {{ wfExecuting ? '执行中...' : '执行工作流' }}
+                            </button>
+                            <button class="btn-ghost" @click="wfReset">重置</button>
+                        </div>
+                    </div>
+
+                    <!-- Progress Bar -->
+                    <div v-if="wfExecuting || wfStatus === 'completed'" class="wf-progress-card">
+                        <div class="wf-progress-bar">
+                            <div class="wf-progress-fill" :class="{ done: wfStatus === 'completed', fail: wfStatus === 'failed' }"
+                                :style="{ width: wfProgress + '%' }"></div>
+                        </div>
+                        <div class="wf-progress-text">{{ Math.round(wfProgress) }}% · {{ wfStatusText }}</div>
+                        <div v-if="wfStatus === 'failed' && wfErrorMessage" class="wf-error">{{ wfErrorMessage }}</div>
+                    </div>
+
+                    <!-- Artifacts -->
+                    <div v-if="wfArtifacts.length" class="wf-artifacts-card">
+                        <h3><i class="fas fa-box-archive"></i> 交付物</h3>
+                        <div class="wf-artifacts-grid">
+                            <div v-for="art in wfArtifacts" :key="art.id" class="wf-artifact-item">
+                                <i :class="artifactIcon(art.type)"></i>
+                                <div class="wf-artifact-info">
+                                    <div class="wf-artifact-title">{{ art.title }}</div>
+                                    <div class="wf-artifact-meta">{{ art.type }} · {{ art.mime_type }}</div>
+                                </div>
+                                <button v-if="art.content" class="btn-ghost" @click="showArtifactContent(art)">查看</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Artifact Content Modal -->
+                    <div v-if="wfArtifactModal" class="hitl-overlay" @click.self="wfArtifactModal = null">
+                        <div class="hitl-modal" style="max-width:800px;max-height:80vh;overflow-y:auto">
+                            <div class="hitl-header">
+                                <h3>{{ wfArtifactModal.title }}</h3>
+                                <button class="icon-btn" @click="wfArtifactModal = null"><i class="fas fa-xmark"></i></button>
+                            </div>
+                            <div class="hitl-body">
+                                <div v-html="renderMarkdown(wfArtifactModal.content || '')"></div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>

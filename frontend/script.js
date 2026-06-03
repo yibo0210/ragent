@@ -39,6 +39,24 @@ createApp({
             authLoading: false,
             authError: '',
             authTenantName: '',
+            // Workflow
+            wfGoal: '',
+            wfPlanning: false,
+            wfPlanData: null,
+            wfPlanError: '',
+            wfExecuting: false,
+            wfExecutionId: '',
+            wfStatus: '',
+            wfProgress: 0,
+            wfStatusText: '',
+            wfErrorMessage: '',
+            wfCurrentStep: '',
+            wfCompletedSteps: [],
+            wfStepResults: {},
+            wfStepErrors: {},
+            wfArtifacts: [],
+            wfPollTimer: null,
+            wfArtifactModal: null,
         };
     },
     mounted() {
@@ -766,7 +784,177 @@ createApp({
                 if (trace[key]) count += trace[key].length;
             }
             return count;
-        }
+        },
+
+        // === Workflow Methods ===
+
+        async wfPlan() {
+            if (this.wfPlanning || !this.wfGoal.trim()) return;
+            this.wfPlanning = true;
+            this.wfPlanError = '';
+            this.wfPlanData = null;
+            try {
+                const res = await this._authFetch('/workflows/plan', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ goal: this.wfGoal.trim() }),
+                });
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    throw new Error(err.detail || `HTTP ${res.status}`);
+                }
+                const data = await res.json();
+                this.wfPlanData = data.plan;
+                this.wfDefinitionId = data.definition_id;
+                this.showToast('计划生成成功', 'success');
+            } catch (e) {
+                this.wfPlanError = '计划生成失败: ' + e.message;
+                this.showToast(this.wfPlanError, 'error');
+            } finally {
+                this.wfPlanning = false;
+            }
+        },
+
+        async wfExecute() {
+            if (this.wfExecuting || !this.wfDefinitionId) return;
+            this.wfExecuting = true;
+            this.wfStatus = 'running';
+            this.wfStatusText = '正在启动...';
+            this.wfProgress = 0;
+            this.wfCurrentStep = '';
+            this.wfCompletedSteps = [];
+            this.wfStepResults = {};
+            this.wfStepErrors = {};
+            this.wfErrorMessage = '';
+            this.wfArtifacts = [];
+            try {
+                const res = await this._authFetch('/workflows/execute', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ definition_id: this.wfDefinitionId }),
+                });
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    throw new Error(err.detail || `HTTP ${res.status}`);
+                }
+                const data = await res.json();
+                this.wfExecutionId = data.execution_id;
+                this.showToast('工作流已启动', 'info');
+                this.wfPollStatus();
+            } catch (e) {
+                this.wfExecuting = false;
+                this.wfStatus = 'failed';
+                this.wfStatusText = '启动失败';
+                this.wfErrorMessage = e.message;
+                this.showToast('执行失败: ' + e.message, 'error');
+            }
+        },
+
+        wfPollStatus() {
+            if (this.wfPollTimer) clearInterval(this.wfPollTimer);
+            this.wfPollTimer = setInterval(async () => {
+                try {
+                    const res = await this._authFetch(`/workflows/${this.wfExecutionId}/status`);
+                    if (!res.ok) return;
+                    const data = await res.json();
+                    this.wfStatus = data.status;
+                    this.wfProgress = data.progress;
+                    this.wfCurrentStep = data.current_step_id;
+                    this.wfErrorMessage = data.error_message || '';
+                    if (data.step_results) {
+                        for (const [sid, r] of Object.entries(data.step_results)) {
+                            if (r.success) {
+                                if (!this.wfCompletedSteps.includes(sid)) this.wfCompletedSteps.push(sid);
+                                this.wfStepResults[sid] = r.data?.response || JSON.stringify(r.data);
+                            } else {
+                                this.wfStepErrors[sid] = r.error;
+                            }
+                        }
+                    }
+
+                    if (data.status === 'completed') {
+                        this.wfStatusText = '执行完成';
+                        this.wfExecuting = false;
+                        clearInterval(this.wfPollTimer);
+                        this.wfPollTimer = null;
+                        this.showToast('工作流执行完成', 'success');
+                        this.wfLoadArtifacts();
+                    } else if (data.status === 'failed') {
+                        this.wfStatusText = '执行失败';
+                        this.wfExecuting = false;
+                        clearInterval(this.wfPollTimer);
+                        this.wfPollTimer = null;
+                        this.showToast('工作流执行失败', 'error');
+                    } else if (data.status === 'cancelled') {
+                        this.wfStatusText = '已取消';
+                        this.wfExecuting = false;
+                        clearInterval(this.wfPollTimer);
+                        this.wfPollTimer = null;
+                    } else if (data.status === 'running') {
+                        const done = this.wfCompletedSteps.length;
+                        const total = this.wfPlanData?.steps?.length || 1;
+                        this.wfStatusText = `执行中 (${done}/${total})`;
+                    }
+                } catch (e) {
+                    // polling error, continue
+                }
+            }, 1500);
+        },
+
+        async wfLoadArtifacts() {
+            try {
+                const res = await this._authFetch(`/workflows/${this.wfExecutionId}/artifacts`);
+                if (res.ok) {
+                    const data = await res.json();
+                    this.wfArtifacts = data.artifacts || [];
+                }
+            } catch (e) { /* ignore */ }
+        },
+
+        wfReset() {
+            if (this.wfPollTimer) { clearInterval(this.wfPollTimer); this.wfPollTimer = null; }
+            this.wfGoal = '';
+            this.wfPlanning = false;
+            this.wfPlanData = null;
+            this.wfPlanError = '';
+            this.wfExecuting = false;
+            this.wfExecutionId = '';
+            this.wfDefinitionId = null;
+            this.wfStatus = '';
+            this.wfProgress = 0;
+            this.wfStatusText = '';
+            this.wfErrorMessage = '';
+            this.wfCurrentStep = '';
+            this.wfCompletedSteps = [];
+            this.wfStepResults = {};
+            this.wfStepErrors = {};
+            this.wfArtifacts = [];
+            this.wfArtifactModal = null;
+        },
+
+        artifactIcon(type) {
+            const map = { report: 'fas fa-file-lines', excel: 'fas fa-file-excel', csv: 'fas fa-file-csv', chart: 'fas fa-chart-bar', dashboard: 'fas fa-grip', pdf: 'fas fa-file-pdf' };
+            return map[type] || 'fas fa-file';
+        },
+
+        showArtifactContent(art) {
+            this.wfArtifactModal = art;
+        },
+
+        renderMarkdown(text) {
+            if (!text) return '';
+            try {
+                return marked.parse(text);
+            } catch (e) {
+                return this.escapeHtml(text);
+            }
+        },
+
+        truncate(text, maxLen) {
+            if (!text) return '';
+            text = String(text);
+            return text.length > maxLen ? text.substring(0, maxLen) + '...' : text;
+        },
     },
     watch: {
         messages: {

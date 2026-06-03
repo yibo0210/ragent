@@ -43,10 +43,19 @@ def handle_doc_ingest(data: dict) -> dict:
         cleanup_by_filename(filename)
 
         # 2. 解析 + 切片
+        tenant_id = data.get("tenant_id", 0)
+        access_level = data.get("access_level", 0)
         loader = DocumentLoader()
         new_docs = loader.load_document(file_path, filename)
         parent_docs = [d for d in new_docs if int(d.get("chunk_level", 0)) in (1, 2)]
         leaf_docs = [d for d in new_docs if int(d.get("chunk_level", 0)) == 3]
+
+        # 2.1 Inject tenant_id and access_level (mirrors routes.py sync path)
+        for doc in parent_docs:
+            doc["tenant_id"] = tenant_id
+        for doc in leaf_docs:
+            doc["tenant_id"] = tenant_id
+            doc["access_level"] = access_level
 
         # 3. 存储父块
         parent_store = ParentChunkStore()
@@ -60,7 +69,7 @@ def handle_doc_ingest(data: dict) -> dict:
         # 5. 更新文档索引
         if not file_hash:
             file_hash = compute_file_hash(file_path)
-        upsert_document_index(filename, file_hash, len(leaf_docs))
+        upsert_document_index(filename, file_hash, len(leaf_docs), tenant_id=tenant_id)
 
         log.info("stage1_complete", filename=filename, chunks=len(leaf_docs))
 

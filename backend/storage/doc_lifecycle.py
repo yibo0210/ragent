@@ -105,9 +105,16 @@ def upsert_document_index(filename: str, file_hash: str, chunk_count: int, tenan
             session.commit()
             return {"action": "created", "old_hash": "", "new_hash": file_hash}
 
-        if doc.file_hash == file_hash:
-            # 内容未变 — 跳过
+        if doc.file_hash == file_hash and doc.chunk_count == chunk_count:
+            # 内容未变且 chunk 数量相同 — 跳过
             return {"action": "skipped", "old_hash": doc.file_hash, "new_hash": file_hash}
+
+        if doc.file_hash == file_hash:
+            # 内容未变但 chunk 数量有更新（异步管线场景：先写0再更新实际值）
+            doc.chunk_count = chunk_count
+            doc.updated_at = now
+            session.commit()
+            return {"action": "updated_chunks", "old_hash": doc.file_hash, "new_hash": file_hash}
 
         # 内容变化 — UPDATE
         old_hash = doc.file_hash

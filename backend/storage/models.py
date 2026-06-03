@@ -135,3 +135,7 @@ class GraphCheckpointWrite(Base):
     channel: Mapped[str] = mapped_column(String(128), nullable=False)
     value: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+
+
+# Make workflow models discoverable by Alembic
+from backend.workflow.models import WorkflowDefinition, WorkflowExecution, WorkflowArtifact  # noqa: F401, E402

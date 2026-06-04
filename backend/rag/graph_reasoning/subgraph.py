@@ -21,15 +21,10 @@ class SubgraphRetriever:
             return nx.DiGraph()
 
         params: dict = {"names": entity_names}
-        tenant_clause = ""
-        if tenant_id is not None:
-            tenant_clause = "AND a.tenant_id = $tenant_id AND b.tenant_id = $tenant_id"
-            params["tenant_id"] = tenant_id
 
         cypher = f"""
             MATCH p = (a:Entity)-[:RELATES_TO*1..{max_hops}]->(b:Entity)
             WHERE a.name IN $names
-              {tenant_clause}
             WITH p, relationships(p) AS rels, nodes(p) AS nds
             UNWIND range(0, size(rels)-1) AS i
             WITH nds[i] AS src, rels[i] AS r, nds[i+1] AS tgt

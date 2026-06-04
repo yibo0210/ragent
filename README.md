@@ -482,6 +482,19 @@ Neo4j Full Graph
 | **Multi-Hop Fix** | `graph_retriever.py` 真正 n-hop 循环扩展，不再仅 1-hop |
 | **Tests** | 47 测试全绿（15 reasoning + 32 regression） |
 
+### Memory Graph System (v19.0)
+
+| Feature | Description |
+|---------|-------------|
+| **Memory Schemas** | `backend/memory/schemas.py` — 4 种记忆类型：Fact/Preference/Task/Relation |
+| **MemoryGraphStore** | `backend/memory/store.py` — Neo4j `:Memory` 节点 MERGE + `:MENTIONS` 关系链接知识图谱 Entity |
+| **MemoryExtractor** | `backend/memory/extractor.py` — LLM 从对话末尾 10 条消息提取结构化记忆（JSON 输出） |
+| **MemoryImportance** | `backend/memory/importance.py` — 时间衰减（30 天半衰期）+ 访问频次三维评分 |
+| **MemoryRetriever** | `backend/memory/retriever.py` — 查询时检索用户记忆并格式化为 `## 用户记忆` 注入 LLM 上下文 |
+| **Brain Hook** | `chat_with_agent` / `chat_with_agent_stream` 保存后异步提取，非阻塞 |
+| **Config Toggle** | `memory_enabled: bool = False` 配置开关，默认关闭 |
+| **Tests** | 57 测试全绿（10 memory + 47 regression） |
+
 ---
 
 ## Tech Stack
@@ -1150,6 +1163,16 @@ This will:
 - [x] ReasoningVerifier: LLM 答案-路径交叉验证
 - [x] Multi-hop fix: graph_retriever 真正 n-hop 循环扩展
 - [x] 47 tests passing (15 reasoning + 32 regression)
+
+### v19.0 — Memory Graph System ✓
+
+- [x] Memory Schemas: Fact/Preference/Task/Relation 四种记忆类型
+- [x] MemoryGraphStore: Neo4j `:Memory` 节点 + `:MENTIONS` 关系链接 Entity
+- [x] MemoryExtractor: LLM 提取对话结构化记忆（JSON）
+- [x] MemoryImportance: 时间衰减 + 访问频次评分
+- [x] MemoryRetriever: 用户记忆上下文注入 LLM prompt
+- [x] Brain Hook: 对话保存后异步提取，Config toggle 控制
+- [x] 57 tests passing (10 memory + 47 regression)
 
 ### v7.x — Planned
 

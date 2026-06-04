@@ -101,6 +101,8 @@ v13: 增量图聚类引擎 — 文档摄入后自动触发局部补丁（新节�
 
 **Graph Reasoning Engine** (v18): 五阶段图推理管线——ReasoningPlanner 将 NL 转为结构化 ReasoningPlan，SubgraphRetriever 通过多跳 Cypher 抽取 Neo4j 子图为 NetworkX DiGraph，PathExplorer 用 BFS+Beam Search 发现候选推理路径，PathRanker 用 4 维加权排序（语义+置信度+时序+长度），ReasoningVerifier 用 LLM 验证答案是否被路径支持（SUPPORTED/PARTIAL/UNSUPPORTED）。修复 local_graph_search 支持真正 n-hop 循环扩展。47 测试全绿。
 
+**Memory Graph System** (v19): 新增 `backend/memory/` 包。MemoryExtractor 在每次对话保存后通过 LLM 提取 Fact/Preference/Task/Relation 四种用户记忆，MemoryGraphStore 用 `MERGE (m:Memory)` 存入 Neo4j 并通过 `:MENTIONS` 关系链接知识图谱 Entity。MemoryImportance 用时间衰减（30天半衰期）+ 访问频次三维评分。MemoryRetriever 在 supervisor_node 检索前将用户记忆格式化为上下文注入 LLM prompt。通过 `memory_enabled` 配置开关控制，默认关闭。57 测试全绿。
+
 ### Key Files
 
 
@@ -197,6 +199,11 @@ v13: 增量图聚类引擎 — 文档摄入后自动触发局部补丁（新节�
 | `backend/rag/graph_reasoning/path_explorer.py` | PathExplorer: BFS + Beam Search 路径发现 |
 | `backend/rag/graph_reasoning/path_ranker.py` | PathRanker: 4 维加权路径排序 |
 | `backend/rag/graph_reasoning/verifier.py` | ReasoningVerifier: LLM 答案-路径交叉验证 |
+| `backend/memory/schemas.py` | MemoryNode, MemoryType (fact/preference/task/relation), MemoryExtraction |
+| `backend/memory/extractor.py` | MemoryExtractor: LLM 从对话末尾10条消息提取结构化记忆 |
+| `backend/memory/store.py` | MemoryGraphStore: Neo4j `:Memory` 节点 CRUD + `:MENTIONS` 关系链接 |
+| `backend/memory/retriever.py` | MemoryRetriever: 查询用户记忆并格式化为 LLM 上下文 |
+| `backend/memory/importance.py` | MemoryImportance: 时间衰减(30天)+频次三维评分 |
 | `tests/test_token_tracker.py` | Token usage + rate limiter tests |
 | `tests/test_rate_limiter.py` | Rate limiter + SLA rule tests |
 | `tests/test_audit.py` | Audit logger + context manager tests |
@@ -332,3 +339,7 @@ v13: 增量图聚类引擎 — 文档摄入后自动触发局部补丁（新节�
 - **v18 PathRanker**: 4 维加权 `score = 0.30*semantic + 0.25*confidence + 0.20*temporal + 0.25*length_penalty`。semantic: 关键词重叠率，confidence: edges/hops 比率，length_penalty: 1/(1+log(1+hops))。
 - **v18 ReasoningVerifier**: System prompt 输出 JSON `{verdict, confidence, explanation, supporting_paths}`，LLM 交叉验证答案与推理路径的一致性。
 - **v18 Multi-hop Fix**: `graph_retriever.local_graph_search` 的邻居扩展从单次改为 `for hop in range(1, graph_hops)` 循环，`NOT other.name IN $names` 防止重复扩展，上限 50 实体。
+- **v19 Memory Graph Store**: `MERGE (m:Memory {memory_id})` 创建 `:Memory` 节点，`ON MATCH` 用 `CASE WHEN $importance > m.importance` 保留最高分。`MATCH (m:Memory)-[r:MENTIONS]->(e:Entity)` 链接到知识图谱实体。
+- **v19 Memory Importance**: `score = base_score * (0.5*exp(-days/30) + 0.3*log(1+freq)/log(5) + 0.2)`。时间衰减 30 天半衰期，访问频次对数归一化。
+- **v19 Memory Extraction Hook**: `chat_with_agent` 和 `chat_with_agent_stream` 在 `storage.save()` 之后通过 `asyncio.create_task` 异步调用 `MemoryExtractor.extract()`，非阻塞失败静默。
+- **v19 Memory Injection**: `supervisor_node` 在 profiler 之后通过 `MemoryRetriever.retrieve(user_id, tenant_id)` 获取记忆上下文，格式化为 `## 用户记忆` 注入 user_query。

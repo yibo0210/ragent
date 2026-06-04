@@ -294,6 +294,23 @@ def supervisor_node(state: SupervisorState) -> dict:
     except Exception:
         query_intent = None
 
+    # v19: Inject user memory context
+    from backend.config import get_settings
+    user_ctx = state.get("user_context") or {}
+    if get_settings().memory_enabled and user_ctx:
+        try:
+            from backend.memory.retriever import get_memory_retriever
+            retriever = get_memory_retriever()
+            memory_context = retriever.retrieve(
+                user_id=user_ctx.get("user_id", 0),
+                tenant_id=user_ctx.get("tenant_id", 0),
+                query=user_query,
+            )
+            if memory_context:
+                user_query = f"{memory_context}\n\n## 当前问题\n{user_query}"
+        except Exception:
+            pass
+
     # v12: L1 简单查询快速通道 — 跳过 Supervisor LLM，直接路由到 direct_answer
     if query_intent and query_intent["level"] == "L1_FACTUAL" and query_intent["complexity_score"] < 0.3:
         agent_trace = state.get("agent_trace") or {}

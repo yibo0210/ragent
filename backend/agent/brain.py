@@ -362,6 +362,28 @@ def chat_with_agent(user_text: str, session_id: str = "default_session", user_co
     storage.save(session_id, messages, extra_message_data=extra_message_data,
                  tenant_id=(user_context or {}).get("tenant_id"))
 
+    # v19: Memory extraction after conversation save
+    from backend.config import get_settings
+    if get_settings().memory_enabled and user_context:
+        try:
+            import asyncio
+            from backend.memory.extractor import get_memory_extractor
+            from backend.memory.store import get_memory_store
+            extractor = get_memory_extractor()
+            store = get_memory_store()
+            async def _extract_memories():
+                extraction = await extractor.extract(
+                    messages=messages,
+                    user_id=user_context.get("user_id", 0),
+                    tenant_id=user_context.get("tenant_id", 0),
+                    session_id=session_id,
+                )
+                for mem in extraction.memories:
+                    store.save(mem)
+            asyncio.create_task(_extract_memories())
+        except Exception:
+            pass
+
     return {
         "response": response_content,
         "rag_trace": rag_trace,
@@ -661,6 +683,24 @@ async def chat_with_agent_stream(user_text: str, session_id: str = "default_sess
     storage.save(session_id, messages, extra_message_data=extra_message_data,
                  tenant_id=(user_context or {}).get("tenant_id"))
 
+    # v19: Memory extraction after streaming conversation save
+    from backend.config import get_settings
+    if get_settings().memory_enabled and user_context:
+        try:
+            from backend.memory.extractor import get_memory_extractor
+            from backend.memory.store import get_memory_store
+            extractor = get_memory_extractor()
+            store = get_memory_store()
+            extraction = await extractor.extract(
+                messages=messages,
+                user_id=user_context.get("user_id", 0),
+                tenant_id=user_context.get("tenant_id", 0),
+                session_id=session_id,
+            )
+            for mem in extraction.memories:
+                store.save(mem)
+        except Exception:
+            pass
 
 # ---------------------------------------------------------------------------
 # HITL 恢复函数

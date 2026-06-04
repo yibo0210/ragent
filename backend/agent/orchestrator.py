@@ -766,18 +766,32 @@ def local_graph_search_node(state: SupervisorState) -> dict:
             "mode": "at_or_after",
         }
 
+    # v17: Apply retrieval plan (adaptive graph)
+    intent = state.get("query_intent") or {}
+    try:
+        from backend.rag.retrieval_planner import get_retrieval_planner
+        planner = get_retrieval_planner()
+        rplan = planner.plan(intent=intent)
+    except Exception:
+        rplan = None
+
     # v12: CRITICAL 状态下跳过图谱搜索，降级到纯向量 (v15: SLA-aware)
     degradation = _get_tenant_degradation(state)
-    if degradation == "cache_only":
-        emit_graph_step("⚡", "SLA 负载降级 — 当前租户降级为纯向量检索", agent="local_graph_search")
+    skip_graph = (degradation == "cache_only") or (rplan is not None and not rplan.use_graph)
+
+    if skip_graph:
+        reason = "SLA 降级" if degradation == "cache_only" else f"v17 Adaptive: query_type={intent.get('query_type','')} skip Neo4j"
+        emit_graph_step("⚡", reason, agent="local_graph_search")
         from backend.rag.utils import retrieve_documents
         result = retrieve_documents(user_query, top_k=5, tenant_id=tenant_id)
-        result["mode"] = "degraded_sla_cache_only"
+        result["mode"] = "dense_only_adaptive"
     else:
-        emit_graph_step("🔍", "局部图谱检索 — Milvus向量定位实体 → Neo4j 1-hop外扩邻居", agent="local_graph_search")
+        graph_hops = rplan.graph_hops if rplan else 1
+        emit_graph_step("🔍", f"局部图谱检索 — {graph_hops}-hop Neo4j 外扩", agent="local_graph_search")
         with tracer.start_as_current_span("agent.local_graph_search") as span:
             span.set_attribute("query", user_query[:200])
-            result = safe_graph_search(user_query, tenant_id=tenant_id)
+            span.set_attribute("graph_hops", graph_hops)
+            result = safe_graph_search(user_query, graph_hops=graph_hops, tenant_id=tenant_id)
 
     emit_graph_step(
         "🔗",
@@ -818,6 +832,24 @@ def global_graph_search_node(state: SupervisorState) -> dict:
     # v14: 传递 tenant_id 用于 Milvus 租户隔离
     user_ctx = state.get("user_context", {}) or {}
     tenant_id = user_ctx.get("tenant_id")
+
+    # v17: Check if query type needs community summaries
+    intent = state.get("query_intent") or {}
+    try:
+        from backend.rag.retrieval_planner import get_retrieval_planner
+        planner = get_retrieval_planner()
+        rplan = planner.plan(intent=intent)
+        use_community = rplan.use_community
+    except Exception:
+        use_community = True
+
+    if not use_community:
+        emit_graph_step("⚡", f"v17 Adaptive: query_type={intent.get('query_type','')} skip community summaries", agent="global_graph_search")
+        return {
+            "messages": [AIMessage(content="")],
+            "agent_trace": {"graph_search_mode": "community_skipped", "reason": "v17_adaptive_skip"},
+            "worker_outputs": {"global_graph_search": {"answer": "", "mode": "skipped"}},
+        }
 
     emit_graph_step("📊", "全局图谱检索 — Milvus社区摘要向量匹配（Leiden聚类生成）", agent="global_graph_search")
     result = global_graph_search(user_query, tenant_id=tenant_id)

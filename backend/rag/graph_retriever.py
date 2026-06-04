@@ -58,28 +58,40 @@ def local_graph_search(
         triples = run_cypher(cypher, time_params)
         graph_triples.extend(triples)
 
+        # v18: True multi-hop expansion loop
         if graph_hops >= 1 and triples:
-            entity_names = set()
+            expanded_entities: set[str] = set()
             for t in triples:
-                entity_names.add(t["subject"])
-                entity_names.add(t["object"])
+                expanded_entities.add(t["subject"])
+                expanded_entities.add(t["object"])
 
-            neighbor_params: dict = {"names": list(entity_names)}
             neighbor_tenant_clause = ""
             if tenant_id is not None:
                 neighbor_tenant_clause = "AND e.tenant_id = $tenant_id AND other.tenant_id = $tenant_id"
-                neighbor_params["tenant_id"] = tenant_id
 
-            neighbor_cypher = f"""
-            MATCH (e:Entity)-[r:RELATES_TO]-(other:Entity)
-            WHERE e.name IN $names
-            {neighbor_tenant_clause}
-            RETURN distinct e.name AS source, r.predicate AS predicate,
-                   other.name AS target, r.description AS desc
-            LIMIT 20
-            """
-            neighbors = run_cypher(neighbor_cypher, neighbor_params)
-            graph_triples.extend(neighbors)
+            for hop in range(1, graph_hops):
+                if len(expanded_entities) > 50:
+                    break
+                neighbor_params: dict = {"names": list(expanded_entities)}
+                if tenant_id is not None:
+                    neighbor_params["tenant_id"] = tenant_id
+
+                neighbor_cypher = f"""
+                MATCH (e:Entity)-[r:RELATES_TO]-(other:Entity)
+                WHERE e.name IN $names
+                  AND NOT other.name IN $names
+                  {neighbor_tenant_clause}
+                RETURN DISTINCT e.name AS source, r.predicate AS predicate,
+                       other.name AS target, r.description AS desc,
+                       r.weight AS weight
+                LIMIT 30
+                """
+                neighbors = run_cypher(neighbor_cypher, neighbor_params)
+                if not neighbors:
+                    break
+                graph_triples.extend(neighbors)
+                for n in neighbors:
+                    expanded_entities.add(n.get("target", ""))
 
     # Step 3: Normalize keys
     normalized_triples = []

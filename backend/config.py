@@ -84,6 +84,11 @@ class Settings(BaseSettings):
     # --- CORS ---
     cors_origins: str = "*"
 
+    # --- v19 Memory Graph ---
+    memory_enabled: bool = False
+    memory_extraction_model: str = ""
+    memory_importance_threshold: float = 0.3
+
     # --- Host/Port ---
     host: str = "0.0.0.0"
     port: int = 8000

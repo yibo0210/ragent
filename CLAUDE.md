@@ -97,6 +97,8 @@ v13: 增量图聚类引擎 — 文档摄入后自动触发局部补丁（新节�
 
 **Agent Workflow Platform** (v16): 新增 Workflow 子系统（独立 LangGraph），支持 Goal → Plan → Execute → Deliver 完整闭环。WorkflowPlanner 通过 LLM 将自然语言目标拆解为 DAG 执行计划，WorkflowExecutor 按依赖关系串行/并行执行步骤。6 个现有 Agent 统一抽象为 WorkflowTool，通过 ToolRegistry 注册。Artifact 系统产出 Report/Excel/Chart/CSV 等交付物并持久化到 MySQL。前端新增任务工作流面板，支持目标输入、DAG 可视化、进度轮询、产物查看。工作流状态通过 MySQL Checkpointer 持久化，支持断点续跑。
 
+**Adaptive GraphRAG** (v17): 在检索层之上引入 Query-Aware 检索决策层。QueryProfiler 从 3 级扩展到 6 种查询类型（factoid/entity_relation/multi_hop/global_summary/temporal/comparison），RetrievalPlanner 根据查询类型输出 RetrievalPlan（通道选择 + 图深度 + 融合策略），weight_matrix 扩展为 6 类型独立 RRF 权重。GraphUtilityEstimator 用 5 维启发式特征预测图检索价值，score < 0.35 跳过 Neo4j。Orchestrator 的 local_graph_search_node 和 global_graph_search_node 通过 intent 动态决定是否调用图检索，factoid 查询走 Dense+Sparse 跳过 Neo4j（省 200-1000ms）。50 测试全绿，23 条 adaptive benchmark Overall 78.3%。
+
 ### Key Files
 
 
@@ -184,6 +186,9 @@ v13: 增量图聚类引擎 — 文档摄入后自动触发局部补丁（新节�
 | `backend/workflow/agent_tools.py` | 将 6 个 Agent 注册为 WorkflowTool（轻量 LLM 调用） |
 | `backend/workflow/artifact.py` | ArtifactGenerator: Report/Excel/Chart/CSV 交付物生成 |
 | `backend/workflow/routes.py` | /workflows/plan, /execute, /status, /artifacts API |
+| `backend/rag/retrieval_planner.py` | RetrievalPlanner: 查询类型→检索策略（通道+图深度+融合） |
+| `backend/rag/graph_utility_estimator.py` | GraphUtilityEstimator: 5维启发式预测图检索价值，低分跳过 Neo4j |
+| `scripts/run_adaptive_evaluation.py` | Adaptive GraphRAG 评测：分类准确率 + Plan 决策 + Utility 预测 |
 | `tests/test_token_tracker.py` | Token usage + rate limiter tests |
 | `tests/test_rate_limiter.py` | Rate limiter + SLA rule tests |
 | `tests/test_audit.py` | Audit logger + context manager tests |
@@ -309,3 +314,8 @@ v13: 增量图聚类引擎 — 文档摄入后自动触发局部补丁（新节�
 - **v16 Artifact 持久化**: `_run_workflow_background` 执行完成后调用 `ArtifactGenerator` 生成 Report，并将内容写入 `workflow_artifacts` 表。前端通过轮询 `/status` 获取进度，完成后通过 `/artifacts` 获取产物。
 - **v16 前端 Workflow 面板**: Vue 3 组件实现 Goal 输入 → Plan DAG 可视化 → Execute 进度轮询 → Artifact 查看。历史记录列表自动加载，点击可回溯查看过往执行。
 - **v16 upsert_document_index 异步管线修复**: 相同 hash 但 chunk_count 不同时（流式管线先写 0 后更新实际值），不再跳过而是更新 chunk_count。Stream consumer 注入 tenant_id 到 doc dicts 避免 FK 约束失败。
+- **v17 6-Type Query Classification**: QueryProfiler 新增 `_classify_query_type()` 方法，关键词匹配 6 种类型（含 temporal 优先逻辑），`_TYPE_PROTOTYPES` 4 条/类型 Embedding 原型，`_type_prototype_embeddings` 独立缓存，warmup() 双批次预热。
+- **v17 RetrievalPlanner**: `STRATEGY_MAP` 字典映射查询类型→RetrievalPlan（Pydantic 模型），`plan(intent=dict)` 支持 graph_hops/graph_skip 覆盖。factoid: 无图 0-hop，multi_hop: graph_first 3-hop，global_summary: community 优先。
+- **v17 Adaptive weight_matrix**: 6 种查询类型独立权重（factoid graph=0, multi_hop graph=0.85, global_summary community=0.80）。`get_weights_for_intent(intent_level, query_type="")` query_type 优先查找，回退 L1/L2/L3。
+- **v17 Orchestrator Adaptive Graph**: `local_graph_search_node` 读取 `state["query_intent"]` 传入 RetrievalPlanner，`skip_graph` 时直接调用 `retrieve_documents` 跳过 Neo4j。`safe_graph_search` 新增 `graph_hops` 参数透传。`global_graph_search_node` 非 community 类型时返回空跳过。
+- **v17 GraphUtilityEstimator**: 5 维特征（entity_density 30% + rel_score 30% + reason_score 25% + time_score 15%），阈值 0.35。`score >= 0.55 → 3-hop`, `>= 0.25 → 1-hop`, `< 0.25 → 0-hop`。纯启发式零 LLM 调用。

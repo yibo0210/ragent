@@ -459,6 +459,17 @@ Neo4j Full Graph
 | **Model** | 3 张新表：`workflow_definitions`, `workflow_executions`, `workflow_artifacts`；Alembic 管理迁移 |
 | **Tests** | 19 个 workflow 单元测试（tool runtime + planner + executor），23 total 全绿 |
 
+### Adaptive GraphRAG (v17.0)
+
+| Feature | Description |
+|---------|-------------|
+| **6-Type Query Classification** | `backend/agent/query_profiler.py` — factoid/entity_relation/multi_hop/global_summary/temporal/comparison 六种类型，关键词+Embedding 混合分类 |
+| **RetrievalPlanner** | `backend/rag/retrieval_planner.py` — 查询类型→RetrievalPlan（通道选择+图深度+融合策略），factoid 跳 Neo4j，multi_hop 3-hop |
+| **Adaptive RRF Weights** | `config/weight_matrix.yaml` — 6 种类型独立 RRF 权重（factoid: Dense=0.8/Graph=0，multi_hop: Graph=0.85） |
+| **GraphUtilityEstimator** | `backend/rag/graph_utility_estimator.py` — 5 维启发式特征预测图检索价值，score<0.35 跳过 Neo4j（零 LLM 调用） |
+| **Orchestrator Integration** | `local_graph_search_node` + `global_graph_search_node` 动态读取 intent，条件跳过图检索/社区摘要 |
+| **Evaluation** | 23 条 benchmark，3 项评测：分类 73.9%, Plan 决策 91.3%, Overall 78.3%；50 测试全绿 |
+
 ---
 
 ## Tech Stack
@@ -1107,6 +1118,16 @@ This will:
 - [x] Workflow API: plan/execute/status/artifacts/list 全链路
 - [x] Frontend Panel: 任务工作流标签页，DAG 可视化，进度条，产物查看，历史记录
 - [x] 23 tests passing (19 workflow + 4 audit)
+
+### v17.0 — Adaptive GraphRAG ✓
+
+- [x] 6-Type Query Classification: factoid/entity_relation/multi_hop/global_summary/temporal/comparison
+- [x] RetrievalPlanner: query-type→RetrievalPlan 通道选择 + 图深度决策
+- [x] Adaptive RRF: 6 种类型独立 weight_matrix，query_type 优先查找
+- [x] GraphUtilityEstimator: 5 维启发式预测图检索价值，低分跳过 Neo4j
+- [x] Orchestrator Integration: graph nodes 动态读取 intent 条件跳过检索
+- [x] Evaluation: 23 条 benchmark, Overall 78.3%
+- [x] 50 tests passing (8 planner + 5 utility + 13 profiler + 10 rrf + 14 other)
 
 ### v7.x — Planned
 

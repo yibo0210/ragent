@@ -23,18 +23,19 @@
 16. [多租户 RBAC 与数据隔离 (v14)](#16-多租户-rbac-与数据隔离-v14)
 17. [SaaS 计量、限流与审计 (v15)](#17-saas-计量限流与审计-v15)
 18. [Agent Workflow Platform (v16)](#18-agent-workflow-platform-v16)
-19. [常见面试问题与回答](#19-常见面试问题与回答)
-20. [代码级深度追问](#20-代码级深度追问高频追问准备)
-21. [实战调试场景](#21-实战调试场景behavioral-questions)
-22. [系统设计追问](#22-系统设计追问system-design)
-23. [高频概念追问](#23-高频概念追问)
-24. [LLM 基础原理](#24-llm-基础原理必考)
-25. [Agent 架构模式](#25-agent-架构模式高频)
-26. [Embedding 模型原理](#26-embedding-模型原理必考)
-27. [高级 RAG 模式](#27-高级-rag-模式高频)
-28. [生产工程](#28-生产工程实战)
-29. [安全与防护](#29-安全与防护生产必问)
-30. [面试技巧总结](#30-面试技巧总结)
+19. [Adaptive GraphRAG (v17)](#19-adaptive-graphrag-v17)
+20. [常见面试问题与回答](#20-常见面试问题与回答)
+21. [代码级深度追问](#21-代码级深度追问高频追问准备)
+22. [实战调试场景](#22-实战调试场景behavioral-questions)
+23. [系统设计追问](#23-系统设计追问system-design)
+24. [高频概念追问](#24-高频概念追问)
+25. [LLM 基础原理](#25-llm-基础原理必考)
+26. [Agent 架构模式](#26-agent-架构模式高频)
+27. [Embedding 模型原理](#27-embedding-模型原理必考)
+28. [高级 RAG 模式](#28-高级-rag-模式高频)
+29. [生产工程](#29-生产工程实战)
+30. [安全与防护](#30-安全与防护生产必问)
+31. [面试技巧总结](#31-面试技巧总结)
 
 ---
 
@@ -1612,7 +1613,16 @@ Vue 3 实现的完整工作流界面：
 
 ---
 
-## 19. 常见面试问题与回答
+## 19. Adaptive GraphRAG (v17)
+
+### 19.1
+
+> "v17 在现有检索层之上引入 Adaptive GraphRAG 检索决策层。核心做了四件事：一是 QueryProfiler 从 3 级扩展到 6 种查询类型，关键词+Embedding 混合分类，factoid/entity_relation/multi_hop/global_summary/temporal/comparison 每种类型有独立的检索策略；二是 RetrievalPlanner，根据查询类型输出通道选择+图深度+融合策略，factoid 直接跳过 Neo4j 省 200-1000ms，multi_hop 用 3-hop 深度遍历；三是 6 种类型独立 RRF 权重矩阵，factoid 的 Graph 权重为 0，multi_hop 的 Graph 权重为 0.85；四是 GraphUtilityEstimator，用 5 维启发式特征预测图检索价值，零 LLM 调用即可决策是否调图。评测 Overall 78.3%，Plan 决策准确率 91.3%，50 测试全绿。"
+
+---
+
+
+## 20. 常见面试问题与回答
 
 ### Q1: 介绍一下你的项目？
 
@@ -1860,7 +1870,7 @@ RAG = Retrieval Augmented Generation，检索增强生成。核心思想是**让
 
 ---
 
-## 20. 代码级深度追问（高频追问准备）
+## 21. 代码级深度追问（高频追问准备）
 
 ### Q16: Supervisor 的 JSON 解析是怎么做的？为什么不用 with_structured_output？
 
@@ -2162,7 +2172,7 @@ graph.add_edge("data_analyst", END)   # 跳过 critique
 
 ---
 
-## 21. 实战调试场景（Behavioral Questions）
+## 22. 实战调试场景（Behavioral Questions）
 
 ### Q24: 如果用户反馈"回答不准确"，你怎么排查？
 
@@ -2235,7 +2245,7 @@ graph.add_edge("data_analyst", END)   # 跳过 critique
 
 ---
 
-## 22. 系统设计追问（System Design）
+## 23. 系统设计追问（System Design）
 
 ### Q27: 如果让你重新设计这个系统，你会做什么不同的决定？
 
@@ -2278,7 +2288,7 @@ graph.add_edge("data_analyst", END)   # 跳过 critique
 
 ---
 
-## 23. 高频概念追问
+## 24. 高频概念追问
 
 ### Q30: RRF 和 BM25 的区别？
 
@@ -2354,7 +2364,7 @@ log.info("user_logged_in", user_id=123)
 
 ---
 
-## 24. LLM 基础原理（必考）
+## 25. LLM 基础原理（必考）
 
 ### Q35: Transformer 的核心机制是什么？
 
@@ -2444,7 +2454,7 @@ CoT Prompt：Q: 8+5×2=? A: 先算乘法 5×2=10，再算加法 8+10=18
 
 ---
 
-## 25. Agent 架构模式（高频）
+## 26. Agent 架构模式（高频）
 
 ### Q39: ReAct 模式是什么？你的系统和它有什么关系？
 
@@ -2559,7 +2569,7 @@ LangGraph 的 StateGraph 保证每个节点的执行是原子性的——一个�
 
 ---
 
-## 26. Embedding 模型原理（必考）
+## 27. Embedding 模型原理（必考）
 
 ### Q43: Embedding 模型是怎么训练的？
 
@@ -2619,7 +2629,7 @@ sparse_embedding = embedding_service.get_sparse_embedding(query)  # BM25
 
 ---
 
-## 27. 高级 RAG 模式（高频）
+## 28. 高级 RAG 模式（高频）
 
 ### Q46: Corrective RAG (CRAG) 是什么？你的系统有类似机制吗？
 
@@ -2697,7 +2707,7 @@ Adaptive RAG 根据查询特征动态调整检索策略：
 
 ---
 
-## 28. 生产工程（实战）
+## 29. 生产工程（实战）
 
 ### Q50: 如何控制 LLM API 成本？
 
@@ -2780,7 +2790,7 @@ Critique：~1000 tokens（verification）
 
 ---
 
-## 29. 安全与防护（生产必问）
+## 30. 安全与防护（生产必问）
 
 ### Q53: 如何防止 Agent 执行危险操作？
 
@@ -2832,7 +2842,7 @@ Critique：~1000 tokens（verification）
 
 ---
 
-## 30. 面试技巧总结
+## 31. 面试技巧总结
 
 ### 回答问题的 STAR 框架
 

@@ -97,7 +97,9 @@ v13: 增量图聚类引擎 — 文档摄入后自动触发局部补丁（新节�
 
 **Agent Workflow Platform** (v16): 新增 Workflow 子系统（独立 LangGraph），支持 Goal → Plan → Execute → Deliver 完整闭环。WorkflowPlanner 通过 LLM 将自然语言目标拆解为 DAG 执行计划，WorkflowExecutor 按依赖关系串行/并行执行步骤。6 个现有 Agent 统一抽象为 WorkflowTool，通过 ToolRegistry 注册。Artifact 系统产出 Report/Excel/Chart/CSV 等交付物并持久化到 MySQL。前端新增任务工作流面板，支持目标输入、DAG 可视化、进度轮询、产物查看。工作流状态通过 MySQL Checkpointer 持久化，支持断点续跑。
 
-**Adaptive GraphRAG** (v17): 在检索层之上引入 Query-Aware 检索决策层。QueryProfiler 从 3 级扩展到 6 种查询类型（factoid/entity_relation/multi_hop/global_summary/temporal/comparison），RetrievalPlanner 根据查询类型输出 RetrievalPlan（通道选择 + 图深度 + 融合策略），weight_matrix 扩展为 6 类型独立 RRF 权重。GraphUtilityEstimator 用 5 维启发式特征预测图检索价值，score < 0.35 跳过 Neo4j。Orchestrator 的 local_graph_search_node 和 global_graph_search_node 通过 intent 动态决定是否调用图检索，factoid 查询走 Dense+Sparse 跳过 Neo4j（省 200-1000ms）。50 测试全绿，23 条 adaptive benchmark Overall 78.3%。
+**Adaptive GraphRAG** (v17): 在检索层之上引入 Query-Aware 检索决策层。QueryProfiler 从 3 级扩展到 6 种查询类型，RetrievalPlanner 根据查询类型输出通道选择+图深度+融合策略，weight_matrix 扩展为 6 类型独立 RRF 权重。GraphUtilityEstimator 用 5 维启发式特征预测图检索价值，低分跳过 Neo4j。Orchestrator graph nodes 通过 intent 动态条件跳过图检索。50 测试全绿。
+
+**Graph Reasoning Engine** (v18): 五阶段图推理管线——ReasoningPlanner 将 NL 转为结构化 ReasoningPlan，SubgraphRetriever 通过多跳 Cypher 抽取 Neo4j 子图为 NetworkX DiGraph，PathExplorer 用 BFS+Beam Search 发现候选推理路径，PathRanker 用 4 维加权排序（语义+置信度+时序+长度），ReasoningVerifier 用 LLM 验证答案是否被路径支持（SUPPORTED/PARTIAL/UNSUPPORTED）。修复 local_graph_search 支持真正 n-hop 循环扩展。47 测试全绿。
 
 ### Key Files
 
@@ -189,6 +191,12 @@ v13: 增量图聚类引擎 — 文档摄入后自动触发局部补丁（新节�
 | `backend/rag/retrieval_planner.py` | RetrievalPlanner: 查询类型→检索策略（通道+图深度+融合） |
 | `backend/rag/graph_utility_estimator.py` | GraphUtilityEstimator: 5维启发式预测图检索价值，低分跳过 Neo4j |
 | `scripts/run_adaptive_evaluation.py` | Adaptive GraphRAG 评测：分类准确率 + Plan 决策 + Utility 预测 |
+| `backend/rag/graph_reasoning/schemas.py` | ReasoningPlan, ReasoningPath, VerificationResult Pydantic |
+| `backend/rag/graph_reasoning/planning.py` | ReasoningPlanner: NL → 结构化推理计划 |
+| `backend/rag/graph_reasoning/subgraph.py` | SubgraphRetriever: Neo4j 多跳 Cypher → NetworkX DiGraph |
+| `backend/rag/graph_reasoning/path_explorer.py` | PathExplorer: BFS + Beam Search 路径发现 |
+| `backend/rag/graph_reasoning/path_ranker.py` | PathRanker: 4 维加权路径排序 |
+| `backend/rag/graph_reasoning/verifier.py` | ReasoningVerifier: LLM 答案-路径交叉验证 |
 | `tests/test_token_tracker.py` | Token usage + rate limiter tests |
 | `tests/test_rate_limiter.py` | Rate limiter + SLA rule tests |
 | `tests/test_audit.py` | Audit logger + context manager tests |
@@ -319,3 +327,8 @@ v13: 增量图聚类引擎 — 文档摄入后自动触发局部补丁（新节�
 - **v17 Adaptive weight_matrix**: 6 种查询类型独立权重（factoid graph=0, multi_hop graph=0.85, global_summary community=0.80）。`get_weights_for_intent(intent_level, query_type="")` query_type 优先查找，回退 L1/L2/L3。
 - **v17 Orchestrator Adaptive Graph**: `local_graph_search_node` 读取 `state["query_intent"]` 传入 RetrievalPlanner，`skip_graph` 时直接调用 `retrieve_documents` 跳过 Neo4j。`safe_graph_search` 新增 `graph_hops` 参数透传。`global_graph_search_node` 非 community 类型时返回空跳过。
 - **v17 GraphUtilityEstimator**: 5 维特征（entity_density 30% + rel_score 30% + reason_score 25% + time_score 15%），阈值 0.35。`score >= 0.55 → 3-hop`, `>= 0.25 → 1-hop`, `< 0.25 → 0-hop`。纯启发式零 LLM 调用。
+- **v18 SubgraphRetriever**: `MATCH p = (a:Entity)-[:RELATES_TO*1..max_hops]->(b:Entity)` 多跳 Cypher，UNWIND 展开路径为三元组，构建 NetworkX DiGraph。空结果返回空图不抛异常。
+- **v18 PathExplorer**: BFS 用 `nx.all_simple_paths(source, target, cutoff=max_hops)` 穷举，Beam Search 每跳保留 top beam_width 路径按 path_score 截断。支持跳过图中不存在的起始实体。
+- **v18 PathRanker**: 4 维加权 `score = 0.30*semantic + 0.25*confidence + 0.20*temporal + 0.25*length_penalty`。semantic: 关键词重叠率，confidence: edges/hops 比率，length_penalty: 1/(1+log(1+hops))。
+- **v18 ReasoningVerifier**: System prompt 输出 JSON `{verdict, confidence, explanation, supporting_paths}`，LLM 交叉验证答案与推理路径的一致性。
+- **v18 Multi-hop Fix**: `graph_retriever.local_graph_search` 的邻居扩展从单次改为 `for hop in range(1, graph_hops)` 循环，`NOT other.name IN $names` 防止重复扩展，上限 50 实体。

@@ -470,6 +470,18 @@ Neo4j Full Graph
 | **Orchestrator Integration** | `local_graph_search_node` + `global_graph_search_node` 动态读取 intent，条件跳过图检索/社区摘要 |
 | **Evaluation** | 23 条 benchmark，3 项评测：分类 73.9%, Plan 决策 91.3%, Overall 78.3%；50 测试全绿 |
 
+### Graph Reasoning Engine (v18.0)
+
+| Feature | Description |
+|---------|-------------|
+| **ReasoningPlanner** | `backend/rag/graph_reasoning/planning.py` — NL→结构化 ReasoningPlan（起始实体+目标关系+最大跳数） |
+| **SubgraphRetriever** | `backend/rag/graph_reasoning/subgraph.py` — 多跳 Cypher 抽取 Neo4j 子图为 NetworkX DiGraph |
+| **PathExplorer** | `backend/rag/graph_reasoning/path_explorer.py` — BFS + Beam Search 候选推理路径发现 |
+| **PathRanker** | `backend/rag/graph_reasoning/path_ranker.py` — 4 维加权排序（语义+置信度+时序+长度） |
+| **ReasoningVerifier** | `backend/rag/graph_reasoning/verifier.py` — LLM 答案-路径交叉验证（SUPPORTED/PARTIAL/UNSUPPORTED） |
+| **Multi-Hop Fix** | `graph_retriever.py` 真正 n-hop 循环扩展，不再仅 1-hop |
+| **Tests** | 47 测试全绿（15 reasoning + 32 regression） |
+
 ---
 
 ## Tech Stack
@@ -1128,6 +1140,16 @@ This will:
 - [x] Orchestrator Integration: graph nodes 动态读取 intent 条件跳过检索
 - [x] Evaluation: 23 条 benchmark, Overall 78.3%
 - [x] 50 tests passing (8 planner + 5 utility + 13 profiler + 10 rrf + 14 other)
+
+### v18.0 — Graph Reasoning Engine ✓
+
+- [x] ReasoningPlanner: NL→结构化 ReasoningPlan（起始实体+最大跳数+推理策略）
+- [x] SubgraphRetriever: 多跳 Cypher → NetworkX DiGraph 子图抽取
+- [x] PathExplorer: BFS + Beam Search 候选推理路径发现
+- [x] PathRanker: 4 维加权路径排序（语义+置信度+时序+长度）
+- [x] ReasoningVerifier: LLM 答案-路径交叉验证
+- [x] Multi-hop fix: graph_retriever 真正 n-hop 循环扩展
+- [x] 47 tests passing (15 reasoning + 32 regression)
 
 ### v7.x — Planned
 

@@ -42,10 +42,22 @@ def reload_weight_matrix() -> dict:
     return load_weight_matrix()
 
 
-def get_weights_for_intent(intent_level: str) -> Tuple[float, float, float, float]:
-    """根据意图级别返回 RRF 权重向量 (dense, sparse, graph, visual)。"""
+def get_weights_for_intent(intent_level: str, query_type: str = "") -> Tuple[float, float, float, float]:
+    """根据意图级别返回 RRF 权重向量 (dense, sparse, graph, visual/community)。
+
+    v17: query_type 优先查找（6-type mapping）；回退到 intent_level（v12 compat）。
+    """
     matrix = load_weight_matrix()
-    entry = matrix.get(intent_level) or matrix.get("DEFAULT")
+    # priority 1: query_type (v17 6-type)
+    entry = None
+    if query_type and query_type in matrix:
+        entry = matrix[query_type]
+    # priority 2: intent_level (v12 L1/L2/L3 compat)
+    if entry is None and intent_level:
+        entry = matrix.get(intent_level)
+    # priority 3: DEFAULT
+    if entry is None:
+        entry = matrix.get("DEFAULT")
     if not entry:
         return (0.4, 0.3, 0.15, 0.15)
     weights = entry.get("weights", [0.4, 0.3, 0.15, 0.15])

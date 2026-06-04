@@ -1,23 +1,44 @@
-# 意图-权重映射矩阵
-# weights: [dense, sparse, graph, visual]
-# 所有权重之和应为 1.0
+# Adaptive RRF Weight Matrix (v17)
+# weights: [dense, sparse, graph, visual/community]
+# v17: 6 query types with intent-specific channel weights
 
+factoid:
+  weights: [0.80, 0.20, 0.00, 0.00]
+  description: "事实类查询，纯向量检索即可，跳过图谱"
+
+entity_relation:
+  weights: [0.30, 0.00, 0.70, 0.00]
+  description: "实体关系查询，图谱为主要通道"
+
+multi_hop:
+  weights: [0.15, 0.00, 0.85, 0.00]
+  description: "多跳推理，图谱优先"
+
+global_summary:
+  weights: [0.20, 0.00, 0.00, 0.80]
+  description: "全局总结，社区摘要为主要通道"
+
+temporal:
+  weights: [0.35, 0.20, 0.45, 0.00]
+  description: "时间敏感查询，Dense+Graph 均衡"
+
+comparison:
+  weights: [0.35, 0.25, 0.35, 0.05]
+  description: "对比分析，多通道均衡"
+
+# v12 backward-compatible entries
 L1_FACTUAL:
-  # 简单事实/闲聊：以 Dense 向量检索为主，不需要图谱
   weights: [0.70, 0.25, 0.00, 0.05]
-  description: "简单事实问答，纯向量检索即可"
+  description: "v12 L1 兼容"
 
 L2_REASONING:
-  # 多跳推理：以 Graph 为主，Dense 辅助定位
   weights: [0.20, 0.10, 0.65, 0.05]
-  description: "多跳逻辑推理，图谱关系外扩为核心"
+  description: "v12 L2 兼容"
 
 L3_MACRO_SUMMARY:
-  # 宏观总结：Dense + Graph 均衡，Sparse 补充
   weights: [0.35, 0.20, 0.35, 0.10]
-  description: "全局总结性查询，多通道均衡检索"
+  description: "v12 L3 兼容"
 
-# 默认权重（当意图识别失败时使用）
 DEFAULT:
   weights: [0.40, 0.30, 0.15, 0.15]
-  description: "默认权重，与 v11 静态配置一致"
+  description: "默认权重"

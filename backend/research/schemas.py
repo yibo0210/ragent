@@ -84,6 +84,13 @@ class ResearchState(BaseModel):
     review_count: int = 0
     max_review_rounds: int = 3
     gap_analyses: list[GapAnalysis] = Field(default_factory=list)
+    # v21: Dynamic Research fields
+    hypotheses: list[Hypothesis] = Field(default_factory=list)
+    evidence_graph: list[EvidenceNode] = Field(default_factory=list)
+    conflicts: list[ConflictDetection] = Field(default_factory=list)
+    expanded_questions: list[ExpandedQuestion] = Field(default_factory=list)
+    dynamic_round: int = 0
+    max_dynamic_rounds: int = 2
     progress: float = 0.0
     error_message: str = ""
     started_at: Optional[str] = None
@@ -110,6 +117,59 @@ class GapAnalysis(BaseModel):
     missing_aspect: str = ""
     supplementary_query: str = ""
     priority: float = 0.0
+
+
+class HypothesisStatus(str, Enum):
+    UNVERIFIED = "unverified"
+    SUPPORTED = "supported"
+    REFUTED = "refuted"
+    PARTIAL = "partial"
+    INCONCLUSIVE = "inconclusive"
+
+
+class Hypothesis(BaseModel):
+    hypothesis_id: str = Field(..., description="e.g. 'H1'")
+    statement: str = Field(..., description="假设陈述")
+    rationale: str = ""
+    status: HypothesisStatus = HypothesisStatus.UNVERIFIED
+    supporting_evidence: list[str] = Field(default_factory=list)
+    refuting_evidence: list[str] = Field(default_factory=list)
+    confidence: float = 0.0
+    verification_tasks: list[str] = Field(default_factory=list)
+
+
+class EvidenceRelationType(str, Enum):
+    SUPPORTS = "SUPPORTS"
+    REFUTES = "REFUTES"
+    RELATES = "RELATES_TO"
+
+
+class EvidenceNode(BaseModel):
+    node_id: str = ""
+    content: str = ""
+    source: str = ""
+    citation: str = ""
+    confidence: float = 0.5
+    hypothesis_id: str = ""
+    task_id: str = ""
+    execution_id: str = ""
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+
+class ConflictDetection(BaseModel):
+    evidence_a: str = ""
+    evidence_b: str = ""
+    has_conflict: bool = False
+    conflict_type: str = ""
+    explanation: str = ""
+    resolution: str = ""
+
+
+class ExpandedQuestion(BaseModel):
+    question: str = ""
+    source: str = ""
+    priority: float = 0.0
+    target_hypothesis: str = ""
 
 
 class ReportFormat(str, Enum):

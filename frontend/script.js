@@ -58,6 +58,17 @@ createApp({
             wfPollTimer: null,
             wfArtifactModal: null,
             wfHistory: [],
+            // Research state
+            researchGoal: '',
+            researchRunning: false,
+            researchState: null,
+            researchEvidence: [],
+            researchReportContent: '',
+            reportFormat: 'markdown',
+            researchHistory: [],
+            researchTimer: null,
+            researchStartTime: null,
+            researchElapsed: '0:00',
         };
     },
     mounted() {
@@ -992,6 +1003,88 @@ createApp({
                 document.querySelector('.wf-goal-card')?.scrollIntoView({ behavior: 'smooth' });
             });
         },
+    },
+        // === Research Methods ===
+
+        async startResearch() {
+            if (!this.researchGoal.trim() || this.researchRunning) return;
+            this.researchRunning = true;
+            this.researchState = { status: 'running', progress: 0, review_count: 0 };
+            this.researchStartTime = Date.now();
+            this.researchElapsed = '0:00';
+            this.researchTimer = setInterval(() => {
+                const elapsed = Math.floor((Date.now() - this.researchStartTime) / 1000);
+                this.researchElapsed = Math.floor(elapsed / 60) + ':' + String(elapsed % 60).padStart(2, '0');
+            }, 1000);
+
+            try {
+                const resp = await this._authFetch('/research/create', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ goal: this.researchGoal, session_id: this.currentSessionId }),
+                });
+                const data = await resp.json();
+                this._pollResearchStatus(data.plan_id);
+            } catch (e) {
+                this.researchRunning = false;
+                clearInterval(this.researchTimer);
+            }
+        },
+
+        async _pollResearchStatus(executionId) {
+            const poll = async () => {
+                try {
+                    const resp = await this._authFetch('/research/' + executionId);
+                    const data = await resp.json();
+                    this.researchState = data;
+
+                    if (data.status === 'completed' || data.status === 'failed' || data.status === 'cancelled') {
+                        this.researchRunning = false;
+                        clearInterval(this.researchTimer);
+                        if (data.status === 'completed') {
+                            await this._loadResearchEvidence(executionId);
+                            await this._loadResearchReport(executionId);
+                        }
+                        await this._loadResearchHistory();
+                        return;
+                    }
+                    setTimeout(poll, 3000);
+                } catch (e) {
+                    this.researchRunning = false;
+                    clearInterval(this.researchTimer);
+                }
+            };
+            poll();
+        },
+
+        async _loadResearchEvidence(executionId) {
+            try {
+                const resp = await this._authFetch('/research/' + executionId + '/evidence');
+                const data = await resp.json();
+                this.researchEvidence = data.evidence || [];
+            } catch (e) { /* ignore */ }
+        },
+
+        async _loadResearchReport(executionId) {
+            try {
+                const resp = await this._authFetch('/research/' + executionId + '/report?format=markdown');
+                const data = await resp.json();
+                this.researchReportContent = data.content || '';
+            } catch (e) { /* ignore */ }
+        },
+
+        async loadResearch(executionId) {
+            this._pollResearchStatus(executionId);
+        },
+
+        async _loadResearchHistory() {
+            try {
+                const resp = await this._authFetch('/research/list');
+                const data = await resp.json();
+                this.researchHistory = data.executions || [];
+            } catch (e) { /* ignore */ }
+        },
+
     },
     watch: {
         messages: {

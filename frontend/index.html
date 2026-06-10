@@ -47,6 +47,10 @@
                     <i class="fas fa-diagram-project"></i>
                     <span class="nav-label">任务工作流</span>
                 </button>
+                <button class="sidebar-bottom-btn" @click="activeNav = 'research'" :class="{active: activeNav === 'research'}">
+                    <i class="fas fa-flask"></i>
+                    <span class="nav-label">研究工具</span>
+                </button>
                 <button class="sidebar-bottom-btn" @click="handleSettings" :class="{active: activeNav === 'settings'}">
                     <i class="fas fa-gear"></i>
                     <span class="nav-label">知识库管理</span>
@@ -262,6 +266,82 @@
                 </div>
             </div>
 
+            <!-- Research Workspace -->
+            <div v-if="activeNav === 'research'" class="research-view">
+                <div class="research-workspace">
+                    <div class="research-input-area">
+                        <h3><i class="fas fa-flask"></i> Deep Research</h3>
+                        <p class="research-desc">Enter a research goal for autonomous multi-agent investigation</p>
+                        <textarea
+                            v-model="researchGoal"
+                            placeholder="e.g., Analyze the development trends of China's AI Agent market over the next three years"
+                            rows="3"
+                        ></textarea>
+                        <button class="btn-primary" @click="startResearch" :disabled="researchRunning">
+                            <i class="fas fa-play"></i> {{ researchRunning ? 'Researching...' : 'Start Research' }}
+                        </button>
+                    </div>
+
+                    <!-- Research Progress -->
+                    <div v-if="researchState" class="research-progress">
+                        <div class="progress-header">
+                            <span class="status-badge" :class="researchState.status">{{ researchState.status }}</span>
+                            <span class="progress-pct">{{ researchState.progress }}%</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" :style="{ width: researchState.progress + '%' }"></div>
+                        </div>
+                        <div class="research-meta">
+                            <span><i class="fas fa-clock"></i> {{ researchElapsed }}</span>
+                            <span v-if="researchState.review_count">
+                                <i class="fas fa-redo"></i> Review round {{ researchState.review_count }}
+                            </span>
+                        </div>
+                    </div>
+
+                    <!-- Evidence Viewer -->
+                    <div v-if="researchEvidence.length" class="research-evidence">
+                        <h4><i class="fas fa-search"></i> Evidence ({{ researchEvidence.length }})</h4>
+                        <div class="evidence-list">
+                            <div v-for="ev in researchEvidence" :key="ev.id" class="evidence-card" :class="'confidence-' + ev.confidence">
+                                <div class="evidence-header">
+                                    <span class="evidence-source">{{ ev.source }}</span>
+                                    <span class="evidence-confidence">{{ ev.confidence }}</span>
+                                </div>
+                                <div class="evidence-content">{{ ev.content }}</div>
+                                <div class="evidence-citation" v-if="ev.citation">
+                                    <i class="fas fa-link"></i> {{ ev.citation }}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Report Viewer -->
+                    <div v-if="researchReportContent" class="research-report">
+                        <h4><i class="fas fa-file-alt"></i> Research Report</h4>
+                        <div class="report-tabs">
+                            <button @click="reportFormat = 'markdown'" :class="{ active: reportFormat === 'markdown' }">Markdown</button>
+                            <button @click="reportFormat = 'pdf'" :class="{ active: reportFormat === 'pdf' }">PDF</button>
+                            <button @click="reportFormat = 'pptx'" :class="{ active: reportFormat === 'pptx' }">PPTX</button>
+                        </div>
+                        <div class="report-content markdown-body" v-html="renderMarkdown(researchReportContent)"></div>
+                    </div>
+
+                    <!-- History -->
+                    <div class="research-history">
+                        <h4><i class="fas fa-history"></i> Research History</h4>
+                        <div v-if="!researchHistory.length" class="empty-state">No research tasks yet</div>
+                        <div v-for="item in researchHistory" :key="item.execution_id" class="history-item" @click="loadResearch(item.execution_id)">
+                            <div class="history-goal">{{ item.goal }}</div>
+                            <div class="history-meta">
+                                <span class="status-badge" :class="item.status">{{ item.status }}</span>
+                                <span>{{ item.created_at }}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Settings Panel -->
             <div v-if="activeNav === 'settings'" class="settings-view">
                 <div class="settings-container">
@@ -368,7 +448,7 @@
             </div>
 
             <!-- Content Area -->
-            <div v-show="activeNav !== 'settings' && activeNav !== 'workflow'" class="content-area">
+            <div v-show="activeNav !== 'settings' && activeNav !== 'workflow' && activeNav !== 'research'" class="content-area">
 
             <!-- Chat View -->
             <div v-show="activeNav !== 'settings'" class="chat-view">

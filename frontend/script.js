@@ -1104,6 +1104,7 @@ createApp({
         },
         activeNav(val) {
             if (val === 'workflow') this.wfLoadHistory();
+            if (val === 'research') this._loadResearchHistory();
         }
     }
 }).mount('#app');

@@ -10,33 +10,34 @@ from backend.workflow.schemas import WorkflowStep, WorkflowPlan
 from backend.workflow.models import WorkflowDefinition
 
 
-_PLANNER_SYSTEM_PROMPT = """You are a workflow planning expert. Given a user's business goal, you MUST output a JSON execution plan with these rules:
+_PLANNER_SYSTEM_PROMPT = """你是一个工作流规划专家。给定用户的业务目标，输出JSON执行计划。
 
-1. Decompose the goal into concrete steps. Each step invokes exactly one tool.
-2. Available tools:
-   - rag_specialist: knowledge base search (documents, manuals, reports)
-   - web_searcher: real-time web search (news, market data, external info)
-   - data_analyst: SQL query for structured data (sales, metrics, logs)
-   - local_graph_search: graph entity exploration (who/what is related to X)
-   - global_graph_search: community-level summary (high-level topic clusters)
-   - direct_answer: simple LLM response (no retrieval needed)
+1. 将目标拆解为具体步骤，每个步骤只调用一个工具。
+2. 可用工具:
+   - rag_specialist: 知识库搜索（文档、手册、报告）
+   - web_searcher: 实时网络搜索（新闻、市场数据、外部信息）
+   - data_analyst: SQL数据分析（销售、指标、日志）
+   - local_graph_search: 知识图谱实体探索（谁/什么与X相关）
+   - global_graph_search: 社区级别摘要（高层次主题聚类）
+   - direct_answer: 直接LLM回答（无需检索）
 
-3. For each step, specify:
-   - step_id: unique ID (step_1, step_2, ...)
-   - name: short human-readable name
-   - tool: one of the above tool names
-   - query: specific natural language task for this step
-   - dependencies: list of step_ids that must complete BEFORE this step
-   - input_mapping: if this step depends on prior results, map variable names
+3. 每个步骤必须指定:
+   - step_id: 唯一ID（step_1, step_2, ...）
+   - name: 简短可读的名称
+   - tool: 上述工具名之一
+   - query: 具体的中文任务描述
+   - dependencies: 必须在前置步骤完成后才能执行的step_id列表
+   - input_mapping: 从前置步骤映射变量名
+   - timeout: 超时秒数
 
-4. Dependency rules:
-   - Steps with NO dependencies run in PARALLEL
-   - Steps with dependencies WAIT for those to finish
-   - Chain sequential steps via dependencies
+4. 依赖规则:
+   - 无依赖的步骤并行执行
+   - 有依赖的步骤等待前置完成
+   - 通过依赖串联顺序步骤
 
-5. Think about what makes sense: data query -> analysis -> visualization -> report
+5. 合理规划: 数据查询 -> 分析 -> 可视化 -> 报告
 
-Output ONLY valid JSON:
+只输出有效JSON，不要其他内容:
 {
   "steps": [
     {
@@ -46,10 +47,10 @@ Output ONLY valid JSON:
       "query": "...",
       "dependencies": [],
       "input_mapping": {},
-      "timeout": 300
+      "timeout": 60
     }
   ],
-  "reasoning": "why you chose this decomposition"
+  "reasoning": "分解逻辑"
 }
 """
 
@@ -85,7 +86,7 @@ class WorkflowPlanner:
 
         messages = [
             SystemMessage(content=_PLANNER_SYSTEM_PROMPT),
-            HumanMessage(content=f"Goal: {goal}\n\nGenerate a JSON execution plan."),
+            HumanMessage(content=f"目标: {goal}\n\n请生成JSON执行计划。"),
         ]
 
         response = await model.ainvoke(messages)
@@ -106,7 +107,7 @@ class WorkflowPlanner:
                 query=s.get("query", ""),
                 dependencies=s.get("dependencies", []),
                 input_mapping=s.get("input_mapping", {}),
-                timeout=s.get("timeout", 300),
+                timeout=s.get("timeout", 60),
             ))
 
         estimated_tokens = len(steps) * 500 + 200

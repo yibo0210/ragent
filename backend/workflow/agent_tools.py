@@ -18,7 +18,7 @@ def _build_contextual_prompt(agent_name: str, query: str, previous_results: dict
     """Build a prompt with context from previous step results."""
     ctx = ""
     if previous_results:
-        ctx = "\n\nPrevious step results:\n"
+        ctx = "\n\n前置步骤结果:\n"
         for dep_id, result in previous_results.items():
             if hasattr(result, 'data') and result.data:
                 response = result.data.get("response", str(result.data))
@@ -30,12 +30,12 @@ def _make_agent_invoke(agent_name: str):
     """Create a lightweight invoke function using direct LLM calls."""
 
     _tool_prompts = {
-        "rag_specialist": "You are a knowledge retrieval specialist. Search and analyze documents to answer the query accurately.",
-        "web_searcher": "You are a web search specialist. Provide real-time information and external data analysis.",
-        "data_analyst": "You are a data analyst. Generate SQL queries and analyze structured data to answer business questions.",
-        "local_graph_search": "You are a graph knowledge specialist. Explore entity relationships and connections.",
-        "global_graph_search": "You are a knowledge curator. Provide high-level topic analysis and community insights.",
-        "direct_answer": "You are a helpful AI assistant. Answer questions directly and concisely.",
+        "rag_specialist": "你是一个知识检索专家。搜索和分析文档来准确回答问题。请用中文回答。",
+        "web_searcher": "你是一个网络搜索专家。提供实时信息和外部数据分析。请用中文回答。",
+        "data_analyst": "你是一个数据分析师。生成SQL查询并分析结构化数据来回答业务问题。请用中文回答。",
+        "local_graph_search": "你是一个知识图谱专家。探索实体关系和连接。请用中文回答。",
+        "global_graph_search": "你是一个知识策展人。提供高层次主题分析和社区洞察。请用中文回答。",
+        "direct_answer": "你是一个有用的AI助手。直接简洁地回答问题。请用中文回答。",
     }
 
     system_prompt = _tool_prompts.get(agent_name, "You are a helpful AI assistant.")
@@ -59,7 +59,7 @@ def _make_agent_invoke(agent_name: str):
 
             messages = [
                 SystemMessage(content=system_prompt),
-                HumanMessage(content=f"Task: {query}{ctx}\n\nProvide a thorough response."),
+                HumanMessage(content=f"任务: {query}{ctx}\n\n请提供详细的中文回答。"),
             ]
 
             response = await model.ainvoke(messages)

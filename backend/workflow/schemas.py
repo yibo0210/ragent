@@ -44,7 +44,7 @@ class WorkflowStep(BaseModel):
         default_factory=dict,
         description="Mapping from dependency step_id to local variable name",
     )
-    timeout: int = Field(default=300, description="Max execution seconds")
+    timeout: int = Field(default=60, description="Max execution seconds")
 
 
 class WorkflowPlan(BaseModel):

@@ -112,7 +112,7 @@ createApp({
                     type: 'workflow', id: w.execution_id,
                     title: w.goal || '工作流',
                     timestamp: w.created_at || '',
-                    action: () => { this.activeNav = 'workflow'; this.wfLoadHistory(); },
+                    action: () => this._loadWorkflowDetail(w.execution_id),
                     del: () => this._deleteWorkflow(w.execution_id),
                 });
             });
@@ -145,6 +145,20 @@ createApp({
             } catch (e) { /* ignore */ }
         },
         // Delete helpers for sidebar history
+        async _loadWorkflowDetail(id) {
+            try {
+                const resp = await this._authFetch('/workflows/' + id + '/status');
+                const data = await resp.json();
+                this.historyModal = {
+                    type: 'workflow',
+                    title: data.goal || '工作流',
+                    status: data.status,
+                    steps: data.step_results || {},
+                    progress: data.progress || 0,
+                    error: data.error_message || '',
+                };
+            } catch (e) { /* ignore */ }
+        },
         async _deleteWorkflow(id) {
             if (!confirm('确定删除此工作流记录？')) return;
             try {

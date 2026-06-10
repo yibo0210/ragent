@@ -57,7 +57,7 @@ class ResearchTask(BaseModel):
     dependencies: list[str] = Field(default_factory=list)
     status: ResearchTaskStatus = ResearchTaskStatus.PENDING
     evidence_ids: list[str] = Field(default_factory=list)
-    timeout: int = 600
+    timeout: int = 60
 
 
 class ResearchPlan(BaseModel):

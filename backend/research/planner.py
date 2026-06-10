@@ -30,7 +30,7 @@ Output ONLY valid JSON:
       "agent": "web|graph|data|internal_kb",
       "query": "specific research question for the agent",
       "dependencies": [],
-      "timeout": 600
+      "timeout": 60
     }
   ],
   "reasoning": "brief explanation of the plan structure"

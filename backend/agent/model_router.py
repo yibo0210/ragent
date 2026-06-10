@@ -32,7 +32,8 @@ def get_model_for_agent(agent_name: str):
         base_url=BASE_URL,
         temperature=0.0,
         max_tokens=8192,
-        timeout=120,
+        timeout=60,
+        max_retries=1,
     )
 
 

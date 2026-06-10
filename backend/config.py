@@ -89,6 +89,13 @@ class Settings(BaseSettings):
     memory_extraction_model: str = ""
     memory_importance_threshold: float = 0.3
 
+    # --- v20 Deep Research ---
+    research_enabled: bool = True
+    research_max_review_rounds: int = 3
+    research_default_timeout_minutes: int = 30
+    research_max_evidence_per_task: int = 20
+    research_report_formats: str = "markdown,pdf"
+
     # --- Host/Port ---
     host: str = "0.0.0.0"
     port: int = 8000

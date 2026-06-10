@@ -338,12 +338,9 @@ async def cancel_workflow(
         ).first()
         if not execution:
             raise HTTPException(status_code=404, detail="Workflow execution not found")
-        if execution.status not in ("pending", "running", "paused"):
-            raise HTTPException(status_code=400, detail="Workflow is not active")
-
-        execution.status = ExecutionStatus.CANCELLED.value
-        execution.completed_at = datetime.now(timezone.utc)
+        # Cascade delete handles artifacts via ORM relationship
+        db.delete(execution)
         db.commit()
-        return {"execution_id": execution_id, "status": "cancelled"}
+        return {"execution_id": execution_id, "status": "deleted"}
     finally:
         db.close()

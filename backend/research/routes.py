@@ -274,8 +274,7 @@ async def delete_research(
         )
         if not record:
             raise HTTPException(status_code=404, detail="Research not found")
-        db.query(ResearchEvidence).filter(ResearchEvidence.execution_id == record.id).delete()
-        db.query(ResearchReportRecord).filter(ResearchReportRecord.execution_id == record.id).delete()
+        # ORM cascade handles children via relationship cascade='all, delete-orphan'
         db.delete(record)
         db.commit()
         return {"status": "deleted", "execution_id": execution_id}

@@ -11,6 +11,8 @@ from backend.config import get_settings
 from backend.research.schemas import (
     ResearchPlan, ResearchTask, ResearchTaskStatus,
     ResearchState, Evidence, ReviewResult, GapAnalysis,
+    Hypothesis, HypothesisStatus, EvidenceNode, EvidenceRelationType,
+    ConflictDetection, ExpandedQuestion,
 )
 from backend.research.research_agents import AGENT_MAP
 from backend.research.evidence_store import get_evidence_store
@@ -45,6 +47,95 @@ class ResearchExecutor:
         try:
             # --- Phase 1: Initial evidence collection ---
             await self._execute_all_tasks(state, tenant_id, user_id, db_record_id)
+
+            # --- Phase 1.5: Hypothesis-Driven Dynamic Research (v21) ---
+            if plan and state.evidence:
+                from backend.research.hypothesis_generator import get_hypothesis_generator
+                from backend.research.evidence_graph import get_evidence_graph
+                from backend.research.conflict_detector import get_conflict_detector
+                from backend.research.question_expander import get_question_expander
+                from backend.research.confidence_estimator import get_confidence_estimator
+
+                hg = get_hypothesis_generator()
+                eg = get_evidence_graph()
+                cd = get_conflict_detector()
+                qe = get_question_expander()
+                ce = get_confidence_estimator()
+
+                # 1. Generate hypotheses
+                existing_findings = " ".join(
+                    r.get("finding", "")[:500] for r in state.task_results.values()
+                )[:3000]
+                state.hypotheses = await hg.generate(plan.goal, context=existing_findings)
+                for h in state.hypotheses:
+                    eg.add_hypothesis(h)
+
+                # 2. Convert evidence to graph nodes
+                evidence_nodes = []
+                for ev in state.evidence:
+                    node = EvidenceNode(
+                        content=ev.content, source=ev.source.value,
+                        citation=ev.citation,
+                        confidence={"high": 0.9, "medium": 0.6, "low": 0.3}.get(ev.confidence.value, 0.5),
+                        task_id=ev.task_id, execution_id=state.execution_id,
+                    )
+                    eg.add_evidence(node)
+                    evidence_nodes.append(node)
+
+                # 3. Link evidence to hypotheses (simple keyword overlap)
+                for node in evidence_nodes:
+                    for hyp in state.hypotheses:
+                        keywords = hyp.statement[:30].replace("是", " ").replace("的", " ").split()
+                        if any(kw in node.content for kw in keywords if len(kw) >= 2):
+                            eg.link_to_hypothesis(node.node_id, hyp.hypothesis_id, EvidenceRelationType.SUPPORTS)
+
+                # 4. Detect conflicts
+                if len(evidence_nodes) >= 2:
+                    conflicts = await cd.detect_all_pairs(evidence_nodes)
+                    state.conflicts = conflicts
+                    for c in conflicts:
+                        if c.has_conflict:
+                            eg.link_evidence_pair(c.evidence_a, c.evidence_b, EvidenceRelationType.REFUTES, c.explanation)
+
+                # 5. Re-estimate confidence
+                conflict_pairs = {(c.evidence_a, c.evidence_b) for c in state.conflicts if c.has_conflict}
+                evidence_nodes = ce.batch_estimate(evidence_nodes, conflict_pairs)
+                state.evidence_graph = evidence_nodes
+
+                # 6. Generate expanded questions + dynamic follow-up (1 round for MVP)
+                expanded = await qe.expand(
+                    goal=plan.goal, hypotheses=state.hypotheses,
+                    conflicts=state.conflicts, verified_hypotheses=state.completed_tasks,
+                )
+                state.expanded_questions = expanded
+
+                if expanded and state.dynamic_round < state.max_dynamic_rounds:
+                    state.dynamic_round += 1
+                    top_q = max(expanded, key=lambda q: q.priority)
+                    task = ResearchTask(
+                        task_id=f"DX{state.dynamic_round}",
+                        name=f"追问: {top_q.question[:40]}",
+                        agent="web", query=top_q.question, dependencies=[], timeout=60,
+                    )
+                    findings, new_evidence = await self._execute_single_task(
+                        task, state.task_results, tenant_id, user_id,
+                    )
+                    state.task_results[task.task_id] = {"finding": findings}
+                    for ev in new_evidence:
+                        node = EvidenceNode(
+                            content=ev.content, source=ev.source.value,
+                            citation=ev.citation,
+                            confidence={"high": 0.9, "medium": 0.6, "low": 0.3}.get(ev.confidence.value, 0.5),
+                            task_id=task.task_id, execution_id=state.execution_id,
+                        )
+                        eg.add_evidence(node)
+                        evidence_nodes.append(node)
+                        if top_q.target_hypothesis:
+                            eg.link_to_hypothesis(node.node_id, top_q.target_hypothesis, EvidenceRelationType.SUPPORTS)
+                    state.evidence_graph = evidence_nodes
+
+                state.progress = 85.0
+                self._update_execution_record(db_record_id, state)
 
             # --- Phase 2: Review -> Gap -> Collect loop ---
             max_rounds = self._settings.research_max_review_rounds

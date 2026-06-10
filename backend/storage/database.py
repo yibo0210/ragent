@@ -34,6 +34,7 @@ import backend.auth.models  # noqa: F401, E402
 import backend.billing.models  # noqa: F401, E402
 import backend.storage.models  # noqa: F401, E402
 import backend.workflow.models  # noqa: F401, E402
+import backend.research.models  # noqa: F401, E402
 
 
 def init_db():

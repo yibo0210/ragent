@@ -36,12 +36,12 @@ class ResearchReportGenerator:
             finding = state.task_results.get(task.task_id, {}).get("finding", "No results")
             tasks_summary += f"\n### {task.name}\n\n{finding}\n"
             task_evidence = evidence_by_task.get(task.task_id, [])
-            for ev in task_evidence:
-                cite = f"[{ev.id}]"
-                evidence_map[ev.id] = ev.citation
-                tasks_summary += f"\n> **Evidence {cite}** ({ev.confidence.value} confidence): {ev.content[:300]}\n"
+            for idx, ev in enumerate(task_evidence, 1):
+                tag = f"[证据{idx}]"
+                evidence_map[tag] = ev.citation or ev.content[:100]
+                tasks_summary += f"\n> **{tag}** ({ev.confidence.value} 置信度): {ev.content[:300]}\n"
                 if ev.citation:
-                    tasks_summary += f"> Source: {ev.citation}\n"
+                    tasks_summary += f"> 来源: {ev.citation}\n"
 
         # Generate full report via LLM
         model = init_chat_model(
@@ -56,7 +56,7 @@ class ResearchReportGenerator:
         from langchain_core.messages import SystemMessage, HumanMessage
 
         import json
-        refs_text = "\n".join(f"[{eid}]: {url}" for eid, url in list(evidence_map.items())[:50])
+        refs_text = "\n".join(f"- {tag}: {url}" for tag, url in list(evidence_map.items())[:50])
 
         prompt = f"""根据以下证据生成一份专业的中文研究报告。
 
@@ -65,22 +65,22 @@ class ResearchReportGenerator:
 收集的证据和发现:
 {tasks_summary[:12000]}
 
-证据ID和来源:
+证据来源清单:
 {refs_text}
 
 报告结构要求（全部使用中文撰写）:
 1. 摘要 (3-5句话概括核心发现)
-2. 关键发现 (编号列表，每一条都附上证据引用)
+2. 关键发现 (编号列表，每一条附上证据引用标签如 [证据1])
 3. 详细分析 (按主题组织，不是按任务)
 4. 影响与建议
 5. 局限性与不足
-6. 参考文献 (所有证据引用)
+6. 参考文献
 
-重要：每个事实性结论必须标注证据ID，如 [ev_abc123]。
+重要：每个事实性结论必须标注证据引用标签，如 [证据1]、[证据2]。
 使用 Markdown 格式：## 标题、**加粗**、列表、> 引用证据。"""
 
         response = await model.ainvoke([
-            SystemMessage(content="你是一位资深研究分析师，撰写证据驱动的研究报告。每个结论必须引用证据ID。请使用中文撰写。"),
+            SystemMessage(content="你是一位资深研究分析师，撰写证据驱动的研究报告。每个结论必须引用证据标签（如[证据1]）。请使用中文撰写。"),
             HumanMessage(content=prompt),
         ])
         content = response.content if hasattr(response, "content") else str(response)

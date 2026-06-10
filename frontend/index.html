@@ -272,9 +272,17 @@
 
             <!-- Research Workspace -->
             <div v-if="activeNav === 'research'" class="research-view">
-                <div class="research-workspace">
-                    <div class="research-input-area">
-                        <h3><i class="fas fa-flask"></i> 深度研究</h3>
+                <div class="research-container">
+                    <div class="research-nav">
+                        <button class="icon-btn" @click="activeNav = 'newChat'" title="返回对话">
+                            <i class="fas fa-arrow-left"></i>
+                        </button>
+                        <h2>深度研究</h2>
+                        <span class="research-desc">输入研究目标，启动多智能体自主调查</span>
+                    </div>
+                    <div class="research-workspace">
+                        <div class="research-input-area">
+                            <h3><i class="fas fa-flask"></i> 深度研究</h3>
                         <p class="research-desc">输入研究目标，启动多智能体自主调查</p>
                         <textarea
                             v-model="researchGoal"
@@ -379,6 +387,7 @@
                             </div>
                         </div>
                     </div>
+                </div>
                 </div>
             </div>
 

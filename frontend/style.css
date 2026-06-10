@@ -805,6 +805,13 @@ body {
 .workflow-nav h2 { font-size: 20px; font-weight: 700; margin: 0; }
 .workflow-desc { color: var(--text-secondary); font-size: 13px; }
 
+.research-container { max-width: 900px; margin: 0 auto; padding: 20px 0; }
+.research-nav {
+  display: flex; align-items: center; gap: 12px; margin-bottom: 8px;
+}
+.research-nav h2 { font-size: 20px; font-weight: 700; margin: 0; color: var(--text-main); }
+.research-nav .research-desc { margin-left: 4px; }
+
 .wf-goal-card {
   background: var(--bg-card); border: 1px solid var(--border);
   border-radius: 14px; padding: 20px; margin-bottom: 20px;

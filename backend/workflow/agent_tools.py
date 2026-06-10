@@ -50,12 +50,49 @@ def _make_agent_invoke(agent_name: str):
             from langchain.chat_models import init_chat_model
             from backend.config import get_settings
             settings = get_settings()
+
+            ctx = _build_contextual_prompt(agent_name, query, previous_results)
+
+            # rag_specialist: actually search the knowledge base
+            if agent_name == "rag_specialist":
+                try:
+                    import asyncio
+                    from backend.rag.utils import retrieve_documents
+                    tenant_id = (user_context or {}).get("tenant_id", 0)
+                    result = await asyncio.to_thread(
+                        retrieve_documents, query=query, tenant_id=tenant_id, top_k=5,
+                    )
+                    docs = result.get("documents", []) or result.get("results", [])
+                    if docs:
+                        kb_context = "\n\n".join(
+                            f"[{d.metadata.get('filename', 'doc') if hasattr(d, 'metadata') else 'doc'}]: {d.page_content[:800] if hasattr(d, 'page_content') else str(d)[:800]}"
+                            for d in docs[:5]
+                        )
+                        ctx = f"\n\n知识库检索结果:\n{kb_context}{ctx}"
+                except Exception:
+                    pass
+
+            # web_searcher: actually search the web
+            if agent_name == "web_searcher":
+                try:
+                    import asyncio
+                    from backend.agent.web_searcher import run_web_search
+                    web_result = await asyncio.to_thread(run_web_search, query, 3)
+                    results = web_result.get("results", []) if isinstance(web_result, dict) else []
+                    if results:
+                        web_ctx = "\n\n".join(
+                            f"[{r.get('title', 'web')}]: {r.get('content', '')[:500]}"
+                            for r in results[:3]
+                        )
+                        ctx = f"\n\n网络搜索结果:\n{web_ctx}{ctx}"
+                except Exception:
+                    pass
+
             model = init_chat_model(
                 model="qwen-turbo", model_provider="openai",
                 api_key=settings.ark_api_key, base_url=settings.base_url,
                 temperature=0.0, max_tokens=1024, timeout=60,
             )
-            ctx = _build_contextual_prompt(agent_name, query, previous_results)
 
             messages = [
                 SystemMessage(content=system_prompt),

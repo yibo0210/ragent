@@ -98,38 +98,36 @@ class WorkflowExecutor:
 
         registry = get_tool_registry()
 
-        for step in ready_steps:
+        # Execute all ready steps in parallel via asyncio.gather
+        async def _run_step(step):
             tool = registry.get(step.tool)
             if tool is None:
-                state["step_results"][step.step_id] = ToolResult(
-                    success=False, error=f"Tool not found: {step.tool}"
-                ).to_dict()
-                state["completed_steps"].append(step.step_id)
-                continue
-
+                return step, ToolResult(success=False, error=f"Tool not found: {step.tool}")
             previous_results = {
                 dep_id: ToolResult(**state["step_results"][dep_id])
                 for dep_id in step.dependencies
                 if dep_id in state.get("step_results", {})
             }
-
             try:
                 result = await asyncio.wait_for(
                     tool.invoke(
-                        query=step.query,
-                        user_context=state.get("user_context", {}),
-                        step=step,
-                        previous_results=previous_results,
+                        query=step.query, user_context=state.get("user_context", {}),
+                        step=step, previous_results=previous_results,
                     ),
                     timeout=step.timeout,
                 )
+                return step, result
             except asyncio.TimeoutError:
-                result = ToolResult(
-                    success=False, error=f"Step timed out after {step.timeout}s"
-                )
+                return step, ToolResult(success=False, error=f"Step timed out after {step.timeout}s")
+            except Exception as e:
+                return step, ToolResult(success=False, error=str(e))
 
-            state["step_results"][step.step_id] = result.to_dict()
-            state["completed_steps"].append(step.step_id)
+        results = await asyncio.gather(*[_run_step(s) for s in ready_steps], return_exceptions=True)
+        for item in results:
+            if isinstance(item, tuple):
+                step, result = item
+                state["step_results"][step.step_id] = result.to_dict()
+                state["completed_steps"].append(step.step_id)
 
         state["progress"] = (len(state["completed_steps"]) / max(total_steps, 1)) * 100.0
         state["current_step_id"] = state["completed_steps"][-1] if state["completed_steps"] else ""

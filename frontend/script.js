@@ -1003,7 +1003,7 @@ createApp({
                 document.querySelector('.wf-goal-card')?.scrollIntoView({ behavior: 'smooth' });
             });
         },
-    },
+
         // === Research Methods ===
 
         async startResearch() {

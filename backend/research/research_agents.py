@@ -48,11 +48,7 @@ Rules:
 
 def _get_model():
     from backend.agent.model_router import get_model_for_agent
-    model = get_model_for_agent("supervisor")
-    # Reduce retries for research tasks — each retry adds 1-2s delay
-    model.max_retries = 1
-    model.timeout = 60
-    return model
+    return get_model_for_agent("supervisor")
 
 
 def _format_previous_results(task_results: dict[str, dict]) -> str:

@@ -63,19 +63,23 @@ async def create_research(
     finally:
         db.close()
 
-    # 3. Execute in background
+    # 3. Execute in background via asyncio.create_task (more reliable than BackgroundTasks)
+    import asyncio
     executor = get_research_executor()
 
     async def run_research():
-        await executor.execute(
-            execution_id=execution_id,
-            plan=plan,
-            tenant_id=user.tenant_id,
-            user_id=user.user_id,
-            session_id=request.get("session_id", ""),
-        )
+        try:
+            await executor.execute(
+                execution_id=execution_id,
+                plan=plan,
+                tenant_id=user.tenant_id,
+                user_id=user.user_id,
+                session_id=request.get("session_id", ""),
+            )
+        except Exception:
+            pass  # Errors are already handled inside executor.execute()
 
-    background_tasks.add_task(run_research)
+    asyncio.create_task(run_research())
 
     return {
         "execution_id": execution_id,

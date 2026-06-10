@@ -1165,7 +1165,20 @@ createApp({
         },
 
         async loadResearch(executionId) {
-            this._pollResearchStatus(executionId);
+            // Load completed research: only show evidence + report, skip active flow
+            this.researchRunning = false;
+            this.researchHypotheses = [];
+            this.researchConflicts = [];
+            this.evidenceGraphData = { nodes: [], edges: [] };
+            try {
+                const resp = await this._authFetch('/research/' + executionId);
+                const data = await resp.json();
+                this.researchState = data;
+                if (data.status === 'completed') {
+                    await this._loadResearchEvidence(executionId);
+                    await this._loadResearchReport(executionId);
+                }
+            } catch (e) { /* ignore */ }
         },
 
         async _loadResearchHistory() {

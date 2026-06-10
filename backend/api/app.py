@@ -82,6 +82,14 @@ def create_app() -> FastAPI:
         from backend.observability import get_logger
         get_logger("ragent.app").warning("workflow_routes_init_failed", error=str(e))
 
+    # --- v20 Research routes ---
+    try:
+        from backend.research.routes import router as research_router
+        app.include_router(research_router)
+    except Exception as e:
+        from backend.observability import get_logger
+        get_logger("ragent.app").warning("research_routes_init_failed", error=str(e))
+
     # --- v5.0 可观测性 (must be after router + before static mount) ---
     from backend.observability import init_logging, init_tracing, init_metrics
     init_logging()

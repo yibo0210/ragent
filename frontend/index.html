@@ -66,6 +66,12 @@
             <div class="sidebar-history">
                 <div class="history-section-label">
                     <span class="nav-label">历史记录</span>
+                    <div class="history-filter-tabs">
+                        <button class="filter-tab" :class="{active: historyFilter === 'all'}" @click="historyFilter = 'all'">全部</button>
+                        <button class="filter-tab" :class="{active: historyFilter === 'chat'}" @click="historyFilter = 'chat'" title="对话"><i class="fas fa-message"></i></button>
+                        <button class="filter-tab" :class="{active: historyFilter === 'workflow'}" @click="historyFilter = 'workflow'" title="工作流"><i class="fas fa-diagram-project"></i></button>
+                        <button class="filter-tab" :class="{active: historyFilter === 'research'}" @click="historyFilter = 'research'" title="研究"><i class="fas fa-flask"></i></button>
+                    </div>
                 </div>
                 <div class="history-scroll">
                     <div v-if="sessionsLoading" class="skeleton-list">
@@ -78,7 +84,7 @@
                         <span class="nav-label">暂无历史</span>
                     </div>
                     <div
-                        v-for="item in combinedHistory"
+                        v-for="item in combinedHistory.filter(h => historyFilter === 'all' || h.type === historyFilter)"
                         :key="item.type + '_' + item.id"
                         class="history-item"
                         :class="{active: item.type === 'chat' && item.id === sessionId}"
@@ -228,32 +234,6 @@
                         </div>
                     </div>
 
-                    <!-- Workflow History -->
-                    <div class="wf-history-card">
-                        <div class="wf-history-header">
-                            <h3><i class="fas fa-clock-rotate-left"></i> 历史记录</h3>
-                            <button class="btn-ghost" @click="wfLoadHistory"><i class="fas fa-rotate"></i> 刷新</button>
-                        </div>
-                        <div v-if="wfHistory.length === 0" class="card-empty" style="padding:20px">
-                            <span>暂无执行记录</span>
-                        </div>
-                        <div v-else class="wf-history-list">
-                            <div v-for="h in wfHistory" :key="h.execution_id" class="wf-history-item"
-                                @click="wfViewHistory(h)">
-                                <div class="wf-history-status" :class="'status-' + h.status">
-                                    <i v-if="h.status === 'completed'" class="fas fa-circle-check"></i>
-                                    <i v-else-if="h.status === 'failed'" class="fas fa-circle-xmark"></i>
-                                    <i v-else-if="h.status === 'running'" class="fas fa-spinner fa-spin"></i>
-                                    <i v-else class="fas fa-circle"></i>
-                                </div>
-                                <div class="wf-history-info">
-                                    <div class="wf-history-id">{{ h.goal || h.execution_id }}</div>
-                                    <div class="wf-history-meta">{{ h.status }} · {{ Math.round(h.progress) }}%</div>
-                                </div>
-                                <i class="fas fa-chevron-right wf-history-arrow"></i>
-                            </div>
-                        </div>
-                    </div>
 
                     <!-- Artifact Content Modal -->
                     <div v-if="wfArtifactModal" class="hitl-overlay" @click.self="wfArtifactModal = null">
@@ -375,18 +355,7 @@
                         <div class="report-content markdown-body" v-html="renderMarkdown(researchReportContent)"></div>
                     </div>
 
-                    <!-- History -->
-                    <div class="research-history">
-                        <h4><i class="fas fa-history"></i> 研究历史</h4>
-                        <div v-if="!researchHistory.length" class="empty-state">暂无研究任务</div>
-                        <div v-for="item in researchHistory" :key="item.execution_id" class="history-item" @click="loadResearch(item.execution_id)">
-                            <div class="history-goal">{{ item.goal }}</div>
-                            <div class="history-meta">
-                                <span class="status-badge" :class="item.status">{{ tStatus(item.status) }}</span>
-                                <span>{{ item.created_at }}</span>
-                            </div>
-                        </div>
-                    </div>
+
                 </div>
                 </div>
             </div>

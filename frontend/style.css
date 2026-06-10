@@ -154,9 +154,18 @@ body {
 
 .sidebar-history { flex: 1; display: flex; flex-direction: column; overflow: hidden; padding: 0 8px; }
 .history-section-label {
+  display: flex; align-items: center; justify-content: space-between;
   padding: 8px 10px 6px; font-size: 11px; font-weight: 600;
   color: var(--text-placeholder); text-transform: uppercase; letter-spacing: 0.8px;
 }
+.history-filter-tabs { display: flex; gap: 2px; }
+.filter-tab {
+  background: transparent; border: none; color: var(--text-placeholder);
+  cursor: pointer; padding: 3px 6px; border-radius: 4px; font-size: 12px;
+  transition: all 0.15s;
+}
+.filter-tab:hover { color: var(--text-main); background: var(--bg-sidebar-hover); }
+.filter-tab.active { color: var(--accent); background: var(--accent-soft); }
 .history-scroll { flex: 1; overflow-y: auto; padding: 2px 0; }
 .history-empty { padding: 24px 10px; color: var(--text-placeholder); font-size: 13px; text-align: center; }
 

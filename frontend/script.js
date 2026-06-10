@@ -76,6 +76,8 @@ createApp({
             },
             confidenceLabels: { high: '高', medium: '中', low: '低' },
             statusLabels: { pending: '等待中', running: '运行中', completed: '已完成', failed: '失败', cancelled: '已取消' },
+            // History filter
+            historyFilter: 'all',
             // v21: Dynamic Research
             researchHypotheses: [],
             researchConflicts: [],

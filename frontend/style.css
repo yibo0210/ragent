@@ -1183,3 +1183,30 @@ body {
     font-size: 12px;
     color: var(--text-secondary);
 }
+
+/* ================= v21: Hypothesis Cards ================= */
+.hypothesis-section { margin-bottom: 24px; }
+.hypothesis-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 12px; }
+.hypothesis-card { background: var(--bg-secondary); border-radius: 8px; padding: 16px; border-left: 4px solid var(--border-color); }
+.hypothesis-card.hypothesis-supported { border-left-color: #22c55e; }
+.hypothesis-card.hypothesis-refuted { border-left-color: #ef4444; }
+.hypothesis-card.hypothesis-partial { border-left-color: #f59e0b; }
+.hypothesis-header { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+.hypothesis-id { font-weight: 700; font-size: 16px; color: var(--accent-color); }
+.hypothesis-status-badge { font-size: 12px; padding: 2px 8px; border-radius: 12px; background: var(--bg-primary); }
+.hypothesis-confidence { font-size: 14px; font-weight: 600; margin-left: auto; }
+.hypothesis-statement { font-size: 14px; font-weight: 500; margin-bottom: 4px; }
+.hypothesis-rationale { font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
+.hypothesis-evidence-count { display: flex; gap: 16px; font-size: 12px; }
+.hypothesis-evidence-count .supporting { color: #22c55e; }
+.hypothesis-evidence-count .refuting { color: #ef4444; }
+
+/* v21: Evidence Graph */
+.evidence-graph-section { margin-bottom: 24px; }
+
+/* v21: Conflict Alerts */
+.conflict-section { margin-bottom: 24px; }
+.conflict-item { background: var(--bg-secondary); border-radius: 8px; padding: 12px; margin-bottom: 8px; border-left: 4px solid #ef4444; }
+.conflict-type { font-size: 12px; font-weight: 600; color: #ef4444; text-transform: uppercase; }
+.conflict-explanation { font-size: 13px; margin: 4px 0; }
+.conflict-resolution { font-size: 12px; color: var(--text-secondary); font-style: italic; }

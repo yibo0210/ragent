@@ -76,6 +76,11 @@ createApp({
             },
             confidenceLabels: { high: '高', medium: '中', low: '低' },
             statusLabels: { pending: '等待中', running: '运行中', completed: '已完成', failed: '失败', cancelled: '已取消' },
+            // v21: Dynamic Research
+            researchHypotheses: [],
+            researchConflicts: [],
+            evidenceGraphData: { nodes: [], edges: [] },
+            _evidenceChartInstance: null,
         };
     },
     mounted() {
@@ -1055,6 +1060,13 @@ createApp({
                         if (data.status === 'completed') {
                             await this._loadResearchEvidence(executionId);
                             await this._loadResearchReport(executionId);
+                            // v21: load hypothesis and conflict data
+                            this.researchHypotheses = data.hypotheses || [];
+                            this.researchConflicts = data.conflicts || [];
+                            this.evidenceGraphData = data.evidence_graph_data || { nodes: [], edges: [] };
+                            if (this.evidenceGraphData.nodes && this.evidenceGraphData.nodes.length) {
+                                this._renderEvidenceGraph();
+                            }
                         }
                         await this._loadResearchHistory();
                         return;
@@ -1094,6 +1106,38 @@ createApp({
                 const data = await resp.json();
                 this.researchHistory = data.executions || [];
             } catch (e) { /* ignore */ }
+        },
+
+        // v21: Evidence graph visualization
+        _renderEvidenceGraph() {
+            if (!this.evidenceGraphData || !this.evidenceGraphData.nodes || !this.evidenceGraphData.nodes.length) return;
+            this.$nextTick(() => {
+                const container = this.$refs.evidenceGraphChart;
+                if (!container) return;
+                if (this._evidenceChartInstance) this._evidenceChartInstance.dispose();
+                const chart = echarts.init(container);
+                this._evidenceChartInstance = chart;
+                const nodes = this.evidenceGraphData.nodes.map(n => ({
+                    id: n.id,
+                    name: n.label,
+                    symbolSize: 20 + (n.confidence || 0.5) * 30,
+                    category: n.hypothesis_id ? (n.hypothesis_id.charCodeAt(1) || 49) - 49 : 0,
+                    itemStyle: { color: (n.confidence || 0.5) > 0.7 ? '#22c55e' : (n.confidence || 0.5) > 0.4 ? '#f59e0b' : '#ef4444' },
+                }));
+                const edges = (this.evidenceGraphData.edges || []).map(e => ({
+                    source: e.from, target: e.to,
+                    lineStyle: { color: e.type === 'REFUTES' ? '#ef4444' : '#3b82f6', width: e.type === 'REFUTES' ? 2 : 1 },
+                }));
+                chart.setOption({
+                    series: [{
+                        type: 'graph', layout: 'force', data: nodes, links: edges,
+                        roam: true, draggable: true,
+                        force: { repulsion: 300, edgeLength: 150 },
+                        label: { show: true, fontSize: 10, formatter: p => (p.name || '').substring(0, 20) },
+                    }],
+                });
+                window.addEventListener('resize', () => chart.resize());
+            });
         },
 
     },

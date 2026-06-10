@@ -1682,6 +1682,31 @@ A: Reviewer 评分 + max 3 rounds 硬限制。评分 ≥ 0.70 或 GapAnalyzer �
 A: (1) qwen-turbo 更快 (2) max_tokens 8192→1024 (3) 精简中文提示词。独立模型实例，不复用全局配置。
 
 
+## 23. Dynamic Research Agent (v21)
+
+### 23.1 一句话总结
+
+> "v21 将 v20 的线性研究升级为 Hypothesis→Evidence→Conflict→Question→Research 动态循环。核心创新：HypothesisGenerator 生成 2~4 个竞争性假设，EvidenceGraph 将证据以 Neo4j 图谱存储（:SUPPORTS/:REFUTES 关系），ConflictDetector 用 LLM 检测跨假设证据矛盾，QuestionExpander 从冲突/缺口自动生成追问驱动新一轮研究。前端新增 Echarts 证据图谱可视化 + 假设卡片 + 矛盾告警。Workflow 页面合并入 Research，统一研究入口。"
+
+### 23.2 与 v20 的关键区别
+
+| 维度 | v20 | v21 |
+|------|-----|-----|
+| 研究模式 | Plan→Execute→Report 线性 | Hypothesis→Evidence→Conflict→Question 动态循环 |
+| 证据存储 | MySQL 平面列表 | Neo4j 证据图谱（节点+关系） |
+| 思考方式 | 执行预设计划 | 提出假设→验证→发现矛盾→追问 |
+| 置信度 | high/medium/low 三档 | 多维度连续评分（来源+交叉验证+反驳+引用） |
+
+### 23.3 面试追问
+
+**Q: 为什么需要假设引擎？**
+A: 避免确认偏差。不做假设直接搜索容易只找到支持预设观点的证据。生成 2~4 个竞争性假设强制从多个角度收集证据，发现矛盾时自动追问。
+
+**Q: Evidence Graph 比 Evidence List 好在哪里？**
+A: 列表看不到证据间关系。图谱的 :SUPPORTS/:REFUTES 边揭示了哪些证据互相支持、哪些互相矛盾，这是 Reviewer 无法从列表中发现的。
+
+---
+
 ## 25. 常见面试问题与回答
 
 ### Q1: 介绍一下你的项目？

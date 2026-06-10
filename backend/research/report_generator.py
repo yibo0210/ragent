@@ -58,29 +58,29 @@ class ResearchReportGenerator:
         import json
         refs_text = "\n".join(f"[{eid}]: {url}" for eid, url in list(evidence_map.items())[:50])
 
-        prompt = f"""Generate a professional research report based on the following evidence.
+        prompt = f"""根据以下证据生成一份专业的中文研究报告。
 
-Research Goal: {plan.goal}
+研究目标: {plan.goal}
 
-Collected Evidence and Findings:
+收集的证据和发现:
 {tasks_summary[:12000]}
 
-Evidence IDs and Sources:
+证据ID和来源:
 {refs_text}
 
-Structure the report with:
-1. Executive Summary (key takeaways in 3-5 sentences)
-2. Key Findings (numbered list, each backed by evidence)
-3. Detailed Analysis (organized by topic, not by task)
-4. Implications & Recommendations
-5. Limitations & Gaps
-6. References (all evidence citations)
+报告结构要求（全部使用中文撰写）:
+1. 摘要 (3-5句话概括核心发现)
+2. 关键发现 (编号列表，每一条都附上证据引用)
+3. 详细分析 (按主题组织，不是按任务)
+4. 影响与建议
+5. 局限性与不足
+6. 参考文献 (所有证据引用)
 
-CRITICAL: Every factual claim must reference an Evidence ID in brackets, e.g. [ev_abc123].
-Use markdown formatting: ## headings, **bold**, bullet points, > blockquotes for evidence."""
+重要：每个事实性结论必须标注证据ID，如 [ev_abc123]。
+使用 Markdown 格式：## 标题、**加粗**、列表、> 引用证据。"""
 
         response = await model.ainvoke([
-            SystemMessage(content="You are a senior research analyst writing an evidence-driven report. Every claim must cite its source evidence ID."),
+            SystemMessage(content="你是一位资深研究分析师，撰写证据驱动的研究报告。每个结论必须引用证据ID。请使用中文撰写。"),
             HumanMessage(content=prompt),
         ])
         content = response.content if hasattr(response, "content") else str(response)
@@ -102,7 +102,7 @@ Use markdown formatting: ## headings, **bold**, bullet points, > blockquotes for
         """Extract executive summary section from report."""
         import re
         match = re.search(
-            r"(?:Executive Summary|概要|摘要)[\s\S]*?(?=##|\Z)",
+            r"(?:摘要|Executive Summary)[\s\S]*?(?=##|\Z)",
             content, re.IGNORECASE,
         )
         if match:

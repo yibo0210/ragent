@@ -14,35 +14,35 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from backend.research.schemas import Evidence, EvidenceSource, EvidenceConfidence
 
 
-_RESEARCH_AGENT_PROMPT = """You are a research agent conducting a systematic investigation.
+_RESEARCH_AGENT_PROMPT = """你是一个研究代理，正在进行系统性调查。请用中文回答。
 
-Research Task: {task_name}
-Research Question: {query}
+研究任务: {task_name}
+研究问题: {query}
 
-Context from previous tasks (if any):
+前置任务结果（如有）:
 {previous_results}
 
-Instructions:
-1. Answer the research question thoroughly with specific facts, data points, and citations
-2. For every claim, provide a source/citation
-3. Output your findings in this JSON format:
+要求:
+1. 用中文详细回答研究问题，提供具体事实、数据和引用
+2. 每个结论都要附上来源/引用
+3. 以JSON格式输出:
 {{
-  "findings": "your detailed findings with inline citations [source: ...]",
-  "citations": ["citation 1", "citation 2"],
+  "findings": "详细的研究发现，内嵌引用标注 [source: ...]",
+  "citations": ["引用1", "引用2"],
   "evidence_items": [
     {{
-      "content": "a specific factual claim with context",
-      "citation": "source URL or reference",
+      "content": "具体的事实性结论及上下文",
+      "citation": "来源URL或参考文献",
       "confidence": "high|medium|low"
     }}
   ],
   "confidence": "high|medium|low"
 }}
 
-Rules:
-- high confidence: multiple reliable sources confirm
-- medium confidence: single reliable source
-- low confidence: inference or unverified source
+置信度规则:
+- high (高): 多个可靠来源一致确认
+- medium (中): 单一可靠来源
+- low (低): 推断或未经验证的来源
 """
 
 
@@ -81,7 +81,7 @@ async def run_web_research(
         task_name=task_name, query=query, previous_results=prev,
     )
     response = await model.ainvoke([
-        SystemMessage(content="You are a web research specialist. Search and synthesize."),
+        SystemMessage(content="你是一个网络研究专家，搜索并综合分析信息。请用中文回答。"),
         HumanMessage(content=prompt),
     ])
     content = response.content if hasattr(response, "content") else str(response)
@@ -99,7 +99,7 @@ async def run_graph_research(
         task_name=task_name, query=query, previous_results=prev,
     )
     response = await model.ainvoke([
-        SystemMessage(content="You are a graph research specialist. Explore entity relationships and reason."),
+        SystemMessage(content="你是一个知识图谱研究专家，探索实体关系并进行推理分析。请用中文回答。"),
         HumanMessage(content=prompt),
     ])
     content = response.content if hasattr(response, "content") else str(response)
@@ -116,7 +116,7 @@ async def run_data_research(
         task_name=task_name, query=query, previous_results=prev,
     )
     response = await model.ainvoke([
-        SystemMessage(content="You are a data research specialist. Query and analyze structured data."),
+        SystemMessage(content="你是一个数据研究专家，查询和分析结构化数据。请用中文回答。"),
         HumanMessage(content=prompt),
     ])
     content = response.content if hasattr(response, "content") else str(response)
@@ -133,7 +133,7 @@ async def run_internal_kb_research(
         task_name=task_name, query=query, previous_results=prev,
     )
     response = await model.ainvoke([
-        SystemMessage(content="You are an internal knowledge base specialist. Search enterprise documents."),
+        SystemMessage(content="你是一个内部知识库专家，搜索企业文档和内部资料。请用中文回答。"),
         HumanMessage(content=prompt),
     ])
     content = response.content if hasattr(response, "content") else str(response)

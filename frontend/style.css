@@ -106,7 +106,7 @@ body {
   overflow: hidden;
   z-index: 30;
 }
-.sidebar-collapsed { width: var(--sidebar-collapsed-w); }
+.sidebar-collapsed { width: var(--sidebar-collapsed-w); opacity: 0; pointer-events: none; }
 
 .sidebar-top {
   display: flex; align-items: center; justify-content: space-between;
@@ -218,7 +218,6 @@ body {
 .icon-btn:hover { background: var(--bg-sidebar-hover); color: var(--text-main); }
 
 .mobile-menu { display: none; }
-.app-wrapper:has(.sidebar-collapsed) .mobile-menu { display: flex; }
 
 .messages-scroll { flex: 1; overflow-y: auto; overflow-x: hidden; }
 

@@ -89,13 +89,27 @@ class ResearchExecutor:
                         if any(kw in node.content for kw in keywords if len(kw) >= 2):
                             eg.link_to_hypothesis(node.node_id, hyp.hypothesis_id, EvidenceRelationType.SUPPORTS)
 
-                # 4. Detect conflicts
-                if len(evidence_nodes) >= 2:
-                    conflicts = await cd.detect_all_pairs(evidence_nodes)
+                # 4. Detect conflicts (only across different hypotheses, skip all-pairs)
+                if len(evidence_nodes) >= 2 and len(state.hypotheses) >= 2:
+                    evidence_by_hyp = {}
+                    for node in evidence_nodes:
+                        hid = node.hypothesis_id or "unknown"
+                        evidence_by_hyp.setdefault(hid, []).append(node)
+                    hyp_ids = list(evidence_by_hyp.keys())
+                    conflicts = []
+                    for i in range(len(hyp_ids)):
+                        for j in range(i + 1, len(hyp_ids)):
+                            for ev_a in evidence_by_hyp[hyp_ids[i]]:
+                                for ev_b in evidence_by_hyp[hyp_ids[j]]:
+                                    if len(conflicts) >= 10:  # max 10 conflicts total
+                                        break
+                                    c = await cd.detect(ev_a, ev_b)
+                                    if c.has_conflict:
+                                        conflicts.append(c)
+                                        eg.link_evidence_pair(c.evidence_a, c.evidence_b, EvidenceRelationType.REFUTES, c.explanation)
+                                if len(conflicts) >= 10:
+                                    break
                     state.conflicts = conflicts
-                    for c in conflicts:
-                        if c.has_conflict:
-                            eg.link_evidence_pair(c.evidence_a, c.evidence_b, EvidenceRelationType.REFUTES, c.explanation)
 
                 # 5. Re-estimate confidence
                 conflict_pairs = {(c.evidence_a, c.evidence_b) for c in state.conflicts if c.has_conflict}

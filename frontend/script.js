@@ -1035,7 +1035,7 @@ createApp({
                     body: JSON.stringify({ goal: this.researchGoal, session_id: this.currentSessionId }),
                 });
                 const data = await resp.json();
-                this._pollResearchStatus(data.plan_id);
+                this._pollResearchStatus(data.execution_id);
             } catch (e) {
                 this.researchRunning = false;
                 clearInterval(this.researchTimer);

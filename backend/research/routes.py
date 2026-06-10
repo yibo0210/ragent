@@ -36,15 +36,39 @@ async def create_research(
     if not goal:
         raise HTTPException(status_code=400, detail="goal is required")
 
+    import uuid
+    execution_id = f"rx_{uuid.uuid4().hex[:16]}"
+
     # 1. Plan
     planner = get_research_planner()
     plan = await planner.plan(goal)
 
-    # 2. Execute in background
+    # 2. Create execution record immediately so frontend can poll
+    db = SessionLocal()
+    try:
+        record = ResearchExecution(
+            execution_id=execution_id,
+            tenant_id=user.tenant_id,
+            user_id=user.user_id,
+            session_id=request.get("session_id", ""),
+            goal=plan.goal,
+            plan_json=plan.model_dump(),
+            status="running",
+        )
+        db.add(record)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to create research execution")
+    finally:
+        db.close()
+
+    # 3. Execute in background
     executor = get_research_executor()
 
     async def run_research():
         await executor.execute(
+            execution_id=execution_id,
             plan=plan,
             tenant_id=user.tenant_id,
             user_id=user.user_id,
@@ -54,7 +78,7 @@ async def create_research(
     background_tasks.add_task(run_research)
 
     return {
-        "plan_id": plan.plan_id,
+        "execution_id": execution_id,
         "plan": plan.model_dump(),
         "status": "started",
         "message": f"Research started with {len(plan.tasks)} tasks, estimated {plan.estimated_duration_minutes} min",

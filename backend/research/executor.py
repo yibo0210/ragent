@@ -25,13 +25,13 @@ class ResearchExecutor:
 
     async def execute(
         self,
+        execution_id: str,
         plan: ResearchPlan,
         tenant_id: int,
         user_id: int,
         session_id: str = "",
     ) -> ResearchState:
         """Execute a full research plan: collect -> review -> gap -> collect loop."""
-        execution_id = f"rx_{uuid.uuid4().hex[:16]}"
         state = ResearchState(
             execution_id=execution_id,
             plan=plan,
@@ -39,10 +39,8 @@ class ResearchExecutor:
             started_at=datetime.now(timezone.utc).isoformat(),
         )
 
-        # Persist execution record
-        db_record_id = self._create_execution_record(
-            execution_id, plan, tenant_id, user_id, session_id,
-        )
+        # Look up the DB record created by the route handler
+        db_record_id = self._get_execution_record_id(execution_id)
 
         try:
             # --- Phase 1: Initial evidence collection ---
@@ -183,28 +181,16 @@ class ResearchExecutor:
             pass  # Report generation is best-effort
         return state
 
-    def _create_execution_record(
-        self, execution_id: str, plan: ResearchPlan,
-        tenant_id: int, user_id: int, session_id: str,
-    ) -> int:
+    def _get_execution_record_id(self, execution_id: str) -> int:
         from backend.storage.database import SessionLocal
         db = SessionLocal()
         try:
-            record = ResearchExecution(
-                execution_id=execution_id,
-                tenant_id=tenant_id,
-                user_id=user_id,
-                session_id=session_id,
-                goal=plan.goal,
-                plan_json=plan.model_dump(),
-                status="running",
-            )
-            db.add(record)
-            db.commit()
-            return record.id
-        except Exception:
-            db.rollback()
-            raise
+            record = db.query(ResearchExecution).filter(
+                ResearchExecution.execution_id == execution_id
+            ).first()
+            if record:
+                return record.id
+            return 0
         finally:
             db.close()
 

@@ -111,6 +111,7 @@ createApp({
                     title: w.goal || '工作流',
                     timestamp: w.created_at || '',
                     action: () => { this.activeNav = 'workflow'; this.wfLoadHistory(); },
+                    del: () => this._deleteWorkflow(w.execution_id),
                 });
             });
             (this.researchHistory || []).forEach(r => {
@@ -119,6 +120,7 @@ createApp({
                     title: r.goal || '研究任务',
                     timestamp: r.created_at || '',
                     action: () => { this.activeNav = 'research'; this.loadResearch(r.execution_id); },
+                    del: () => this._deleteResearch(r.execution_id),
                 });
             });
             items.sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''));
@@ -138,6 +140,23 @@ createApp({
                 const rsData = await rsR.json();
                 this.wfHistory = wfData.executions || [];
                 this.researchHistory = rsData.executions || [];
+            } catch (e) { /* ignore */ }
+        },
+        // Delete helpers for sidebar history
+        async _deleteWorkflow(id) {
+            if (!confirm('确定删除此工作流记录？')) return;
+            try {
+                await this._authFetch('/workflows/' + id, { method: 'DELETE' });
+                this.showToast('已删除');
+                this._loadAllHistory();
+            } catch (e) { /* ignore */ }
+        },
+        async _deleteResearch(id) {
+            if (!confirm('确定删除此研究记录？')) return;
+            try {
+                await this._authFetch('/research/' + id, { method: 'DELETE' });
+                this.showToast('已删除');
+                this._loadAllHistory();
             } catch (e) { /* ignore */ }
         },
         // Translate research source/confidence/status

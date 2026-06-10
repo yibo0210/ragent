@@ -254,3 +254,33 @@ async def cancel_research(
         return {"status": "cancelled", "execution_id": execution_id}
     finally:
         db.close()
+
+
+@router.delete("/{execution_id}")
+async def delete_research(
+    execution_id: str,
+    user: UserContext = Depends(get_current_user),
+):
+    """Delete a research execution and its evidence/reports."""
+    db = SessionLocal()
+    try:
+        record = (
+            db.query(ResearchExecution)
+            .filter(
+                ResearchExecution.execution_id == execution_id,
+                ResearchExecution.tenant_id == user.tenant_id,
+            )
+            .first()
+        )
+        if not record:
+            raise HTTPException(status_code=404, detail="Research not found")
+        db.query(ResearchEvidence).filter(ResearchEvidence.execution_id == record.id).delete()
+        db.query(ResearchReportRecord).filter(ResearchReportRecord.execution_id == record.id).delete()
+        db.delete(record)
+        db.commit()
+        return {"status": "deleted", "execution_id": execution_id}
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to delete research")
+    finally:
+        db.close()

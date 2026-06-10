@@ -94,7 +94,7 @@
                         <i v-else-if="item.type === 'workflow'" class="fas fa-diagram-project"></i>
                         <i v-else-if="item.type === 'research'" class="fas fa-flask"></i>
                         <span class="history-title nav-label">{{ item.title }}</span>
-                        <button v-if="item.type === 'chat'" class="history-delete" @click.stop="item.del()" title="删除">
+                        <button class="history-delete" @click.stop="item.del()" title="删除">
                             <i class="fas fa-trash-can"></i>
                         </button>
                     </div>

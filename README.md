@@ -495,6 +495,23 @@ Neo4j Full Graph
 | **Config Toggle** | `memory_enabled: bool = False` 配置开关，默认关闭 |
 | **Tests** | 57 测试全绿（10 memory + 47 regression） |
 
+### Deep Research Engine (v20.0)
+
+| Feature | Description |
+|---------|-------------|
+| **Research Planner** | `backend/research/planner.py` — LLM 将研究目标拆解为 DAG 执行计划，自动分析任务依赖关系 |
+| **Research Executor** | `backend/research/executor.py` — DAG 执行引擎，串行+并行调度 Research Agent，断点恢复 + 实时进度持久化 |
+| **Research Agents** | `backend/research/research_agents.py` — Web/Graph/Data/Internal KB 四大代理，统一输出结构化 Evidence |
+| **Evidence Store** | `backend/research/evidence_store.py` — 证据持久化 + 多维度查询 + 覆盖率统计 |
+| **Research Reviewer** | `backend/research/reviewer.py` — 4 维加权评分（覆盖率/多样性/引用/置信度），阈值 0.70 |
+| **Gap Analyzer** | `backend/research/gap_analyzer.py` — LLM 分析证据缺口 → 自动生成补充检索查询 |
+| **Report Generator** | `backend/research/report_generator.py` — 证据驱动中文报告（Markdown），每条结论绑定 Evidence ID |
+| **Artifact Extension** | `backend/workflow/artifact.py` — 新增 PDF (reportlab) + PPTX (python-pptx) 生成 |
+| **Research API** | `backend/research/routes.py` — POST /create, GET /{id}/status/evidence/report, POST /cancel, GET /list |
+| **Frontend Panel** | 研究工作区标签页：目标输入 → 实时进度条 → 证据卡片查看 → 报告阅读 → 历史回溯 |
+| **Config** | `research_enabled: bool = True`, `research_max_review_rounds: int = 3` |
+| **Tests** | 16 测试全绿（schemas + reviewer + gap_analyzer + evidence_store + planner + executor） |
+
 ---
 
 ## Tech Stack
@@ -658,6 +675,25 @@ Ragent-AI/
 │   │   ├── semantic_cache.py   # Milvus ANN + cosine + MySQL store
 │   │   ├── singleflight.py     # Redis Singleflight anti-stampede
 │   │   └── invalidation.py     # Document delete → cache eviction
+│   ├── memory/                 # Memory Graph System (v19.0)
+│   │   ├── __init__.py
+│   │   ├── schemas.py          # MemoryNode, MemoryType, MemoryExtraction
+│   │   ├── extractor.py        # LLM 从对话提取结构化记忆
+│   │   ├── store.py            # Neo4j :Memory 节点 CRUD
+│   │   ├── retriever.py        # 查询用户记忆注入 LLM 上下文
+│   │   └── importance.py       # 时间衰减 + 频次评分
+│   ├── research/               # Deep Research Engine (v20.0)
+│   │   ├── __init__.py
+│   │   ├── schemas.py          # ResearchPlan, Evidence, ReviewResult, GapAnalysis
+│   │   ├── models.py           # ORM: ResearchExecution, ResearchEvidence, ResearchReportRecord
+│   │   ├── planner.py          # Goal → DAG 执行计划
+│   │   ├── executor.py         # DAG 执行 + 审核循环 + 实时进度
+│   │   ├── evidence_store.py   # 证据持久化 + 多维查询
+│   │   ├── research_agents.py  # Web/Graph/Data/Internal KB 研究代理
+│   │   ├── reviewer.py         # 4 维证据评分
+│   │   ├── gap_analyzer.py     # 证据缺口分析 + 补充检索
+│   │   ├── report_generator.py # 证据驱动中文报告
+│   │   └── routes.py           # /research/* API 端点
 │   └── schemas.py              # Pydantic: Chat*, Document*, HITL*, GraphEntity, QueryPlan, CritiqueResult
 │
 ├── scripts/
@@ -943,6 +979,17 @@ This will:
 |--------|----------|-------------|
 | `GET` | `/metrics` | Prometheus metrics endpoint (token usage, latency, routing, circuit breaker) |
 
+### Research (v20.0)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/research/create` | Create and start a new research task |
+| `GET` | `/research/list` | List user's research executions |
+| `GET` | `/research/{id}` | Get research status + progress |
+| `GET` | `/research/{id}/evidence` | List collected evidence items |
+| `GET` | `/research/{id}/report` | Get generated research report |
+| `POST` | `/research/{id}/cancel` | Cancel running research |
+
 ### Documents
 
 | Method | Endpoint | Description |
@@ -1173,6 +1220,19 @@ This will:
 - [x] MemoryRetriever: 用户记忆上下文注入 LLM prompt
 - [x] Brain Hook: 对话保存后异步提取，Config toggle 控制
 - [x] 57 tests passing (10 memory + 47 regression)
+
+### v20.0 — Deep Research Engine ✓
+
+- [x] Research Planner: LLM 将研究目标拆解为 DAG 执行计划（3~6 子任务，依赖关系自动分析）
+- [x] Research Executor: DAG 执行引擎，串行+并行调度 4 个 Research Agent，支持断点恢复
+- [x] Research Agents: Web/Graph/Data/Internal KB 四大研究代理，统一输出结构化证据
+- [x] Evidence Store: 证据持久化 + 多维度查询 + 统计（来源/置信度/覆盖率）
+- [x] Research Reviewer: 4 维证据评分（覆盖率 35% + 多样性 20% + 引用 25% + 置信度 20%）
+- [x] Gap Analyzer: LLM 缺失分析 → 自动补充检索，Collect→Review→Gap→Collect 循环（max 3 rounds）
+- [x] Report Generator: 证据驱动中文研究报告（Markdown/PDF/PPTX），每条结论绑定 Evidence ID
+- [x] Research API: /research/create/status/evidence/report/cancel/list 全链路
+- [x] Frontend Research Workspace: 进度实时监控 + 证据卡片查看 + 报告阅读 + 历史回溯
+- [x] 16 tests passing (schemas + reviewer + gap_analyzer + evidence_store + planner + executor)
 
 ### v7.x — Planned
 

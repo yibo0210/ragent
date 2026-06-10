@@ -103,6 +103,8 @@ v13: 增量图聚类引擎 — 文档摄入后自动触发局部补丁（新节�
 
 **Memory Graph System** (v19): 新增 `backend/memory/` 包。MemoryExtractor 在每次对话保存后通过 LLM 提取 Fact/Preference/Task/Relation 四种用户记忆，MemoryGraphStore 用 `MERGE (m:Memory)` 存入 Neo4j 并通过 `:MENTIONS` 关系链接知识图谱 Entity。MemoryImportance 用时间衰减（30天半衰期）+ 访问频次三维评分。MemoryRetriever 在 supervisor_node 检索前将用户记忆格式化为上下文注入 LLM prompt。通过 `memory_enabled` 配置开关控制，默认关闭。57 测试全绿。
 
+**Deep Research Engine** (v20): 新增 `backend/research/` 包。ResearchPlanner 将研究目标通过 LLM 拆解为 DAG 执行计划（3~6 子任务，含依赖关系），ResearchExecutor 按依赖关系串行/并行调度 4 个 ResearchAgent（Web/Graph/Data/Internal KB），所有 Agent 输出统一为 Evidence 存入 EvidenceStore。ResearchReviewer 用 4 维加权评分（覆盖率 35% + 多样性 20% + 引用 25% + 置信度 20%）评估证据充分性，GapAnalyzer 自动生成补充检索查询，形成 Collect→Review→Gap→Collect 循环（max 3 rounds）。最终由 ResearchReportGenerator 生成证据驱动中文研究报告（每条结论绑定 Evidence ID）。前端新增研究工作区标签页（进度实时监控 + 证据卡片 + 报告阅读 + 历史回溯）。使用 qwen-turbo + max_tokens=1024 优化 LLM 响应速度。16 测试全绿。
+
 ### Key Files
 
 
@@ -204,6 +206,17 @@ v13: 增量图聚类引擎 — 文档摄入后自动触发局部补丁（新节�
 | `backend/memory/store.py` | MemoryGraphStore: Neo4j `:Memory` 节点 CRUD + `:MENTIONS` 关系链接 |
 | `backend/memory/retriever.py` | MemoryRetriever: 查询用户记忆并格式化为 LLM 上下文 |
 | `backend/memory/importance.py` | MemoryImportance: 时间衰减(30天)+频次三维评分 |
+| `backend/research/schemas.py` | ResearchPlan, Evidence, ReviewResult, GapAnalysis Pydantic |
+| `backend/research/models.py` | ORM: ResearchExecution, ResearchEvidence, ResearchReportRecord |
+| `backend/research/planner.py` | ResearchPlanner: LLM goal→DAG plan decomposition (qwen-turbo) |
+| `backend/research/executor.py` | ResearchExecutor: DAG 执行 + 审核循环 + 实时进度持久化 |
+| `backend/research/evidence_store.py` | EvidenceStore: 证据持久化 + 多维查询统计 |
+| `backend/research/research_agents.py` | 4 ResearchAgent 封装 (web/graph/data/internal_kb) |
+| `backend/research/reviewer.py` | ResearchReviewer: 4 维证据评分 (coverage/diversity/citation/confidence) |
+| `backend/research/gap_analyzer.py` | GapAnalyzer: LLM 缺失分析 → 补充检索查询 |
+| `backend/research/report_generator.py` | ResearchReportGenerator: 证据驱动中文报告生成 |
+| `backend/research/routes.py` | /research/* API 端点 (create/status/evidence/report/cancel/list) |
+| `tests/test_research.py` | v20 研究引擎 16 个单元测试 |
 | `tests/test_token_tracker.py` | Token usage + rate limiter tests |
 | `tests/test_rate_limiter.py` | Rate limiter + SLA rule tests |
 | `tests/test_audit.py` | Audit logger + context manager tests |
@@ -343,3 +356,13 @@ v13: 增量图聚类引擎 — 文档摄入后自动触发局部补丁（新节�
 - **v19 Memory Importance**: `score = base_score * (0.5*exp(-days/30) + 0.3*log(1+freq)/log(5) + 0.2)`。时间衰减 30 天半衰期，访问频次对数归一化。
 - **v19 Memory Extraction Hook**: `chat_with_agent` 和 `chat_with_agent_stream` 在 `storage.save()` 之后通过 `asyncio.create_task` 异步调用 `MemoryExtractor.extract()`，非阻塞失败静默。
 - **v19 Memory Injection**: `supervisor_node` 在 profiler 之后通过 `MemoryRetriever.retrieve(user_id, tenant_id)` 获取记忆上下文，格式化为 `## 用户记忆` 注入 user_query。
+- **v20 Research Planner**: `ResearchPlanner.plan()` 调用 `init_chat_model("qwen-turbo", max_tokens=1024)` 生成精简 JSON 计划。独立模型实例，不复用 model_router 全局配置。
+- **v20 Research Executor**: `_execute_all_tasks` 按依赖关系分批执行——无依赖任务并行 (`asyncio.gather`)，有依赖任务等待前序完成。每批完成后立即 `_update_execution_record()` 持久化进度到 MySQL。
+- **v20 Research Agents**: 4 个 agent 函数（`run_web_research`/`run_graph_research`/`run_data_research`/`run_internal_kb_research`）通过 `AGENT_MAP` 字典调度，统一返回 `tuple[str, list[Evidence]]`。每个 agent 独立创建 `init_chat_model` 实例（qwen-turbo, max_tokens=1024, timeout=60）。
+- **v20 Evidence Store**: `EvidenceStore.save_batch()` 批量写入 MySQL `research_evidence` 表。`get_stats()` 返回来源分布 + 置信度分布 + 覆盖率统计。
+- **v20 Reviewer**: 纯启发式评分（零 LLM 调用）——覆盖率 = 有证据的 task 占比，多样性 = 来源种类/4，引用率 = 有 citation 的 evidence 占比，置信度 = high=1.0/medium=0.6/low=0.3 均值。`overall >= 0.70 AND coverage >= 0.60` 判定通过。
+- **v20 Gap Analyzer**: `GapAnalyzer.analyze()` 先尝试 LLM 分析生成补充查询，失败则 fallback 到启发式（取第一个 gap 作为查询）。`is_sufficient=True` 时直接返回空。
+- **v20 Report Generator**: `ResearchReportGenerator.generate()` 构建 evidence_by_task 索引 + task_results 摘要，调用 LLM 生成中文 Markdown 报告。`_extract_summary()` 用正则提取"摘要"段落。每条结论必须引用 Evidence ID。
+- **v20 Async Execution**: routes.py 使用 `asyncio.create_task()` 而非 FastAPI `BackgroundTasks` 启动后台研究任务——前者在当前 event loop 中可靠调度，后者在某些 Starlette 版本中可能不执行 async 任务。
+- **v20 Progress Persistence**: Executor 在 `_execute_all_tasks` 的 while 循环内每批任务完成后调用 `_update_execution_record()`，前端 3 秒轮询 `/research/{id}` 立即感知进度变化。
+- **v20 Model Optimization**: Research 模块使用独立 `init_chat_model("qwen-turbo", max_tokens=1024, timeout=60)` 而非全局 model_router (qwen-plus, max_tokens=8192, timeout=120)。Planner 74s → 6.6s (11x 提升)。Agent prompt 精简为中文短提示词。

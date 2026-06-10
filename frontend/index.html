@@ -270,22 +270,22 @@
             <div v-if="activeNav === 'research'" class="research-view">
                 <div class="research-workspace">
                     <div class="research-input-area">
-                        <h3><i class="fas fa-flask"></i> Deep Research</h3>
-                        <p class="research-desc">Enter a research goal for autonomous multi-agent investigation</p>
+                        <h3><i class="fas fa-flask"></i> 深度研究</h3>
+                        <p class="research-desc">输入研究目标，启动多智能体自主调查</p>
                         <textarea
                             v-model="researchGoal"
-                            placeholder="e.g., Analyze the development trends of China's AI Agent market over the next three years"
+                            placeholder="例如：分析中国AI Agent市场未来三年的发展趋势"
                             rows="3"
                         ></textarea>
                         <button class="btn-primary" @click="startResearch" :disabled="researchRunning">
-                            <i class="fas fa-play"></i> {{ researchRunning ? 'Researching...' : 'Start Research' }}
+                            <i class="fas fa-play"></i> {{ researchRunning ? '研究中...' : '开始研究' }}
                         </button>
                     </div>
 
                     <!-- Research Progress -->
                     <div v-if="researchState" class="research-progress">
                         <div class="progress-header">
-                            <span class="status-badge" :class="researchState.status">{{ researchState.status }}</span>
+                            <span class="status-badge" :class="researchState.status">{{ tStatus(researchState.status) }}</span>
                             <span class="progress-pct">{{ researchState.progress }}%</span>
                         </div>
                         <div class="progress-bar">
@@ -294,19 +294,19 @@
                         <div class="research-meta">
                             <span><i class="fas fa-clock"></i> {{ researchElapsed }}</span>
                             <span v-if="researchState.review_count">
-                                <i class="fas fa-redo"></i> Review round {{ researchState.review_count }}
+                                <i class="fas fa-redo"></i> 审核轮次 {{ researchState.review_count }}
                             </span>
                         </div>
                     </div>
 
                     <!-- Evidence Viewer -->
                     <div v-if="researchEvidence.length" class="research-evidence">
-                        <h4><i class="fas fa-search"></i> Evidence ({{ researchEvidence.length }})</h4>
+                        <h4><i class="fas fa-search"></i> 证据 ({{ researchEvidence.length }})</h4>
                         <div class="evidence-list">
                             <div v-for="ev in researchEvidence" :key="ev.id" class="evidence-card" :class="'confidence-' + ev.confidence">
                                 <div class="evidence-header">
-                                    <span class="evidence-source">{{ ev.source }}</span>
-                                    <span class="evidence-confidence">{{ ev.confidence }}</span>
+                                    <span class="evidence-source">{{ tSource(ev.source) }}</span>
+                                    <span class="evidence-confidence">{{ tConfidence(ev.confidence) }}</span>
                                 </div>
                                 <div class="evidence-content">{{ ev.content }}</div>
                                 <div class="evidence-citation" v-if="ev.citation">
@@ -318,7 +318,7 @@
 
                     <!-- Report Viewer -->
                     <div v-if="researchReportContent" class="research-report">
-                        <h4><i class="fas fa-file-alt"></i> Research Report</h4>
+                        <h4><i class="fas fa-file-alt"></i> 研究报告</h4>
                         <div class="report-tabs">
                             <button @click="reportFormat = 'markdown'" :class="{ active: reportFormat === 'markdown' }">Markdown</button>
                             <button @click="reportFormat = 'pdf'" :class="{ active: reportFormat === 'pdf' }">PDF</button>
@@ -329,12 +329,12 @@
 
                     <!-- History -->
                     <div class="research-history">
-                        <h4><i class="fas fa-history"></i> Research History</h4>
-                        <div v-if="!researchHistory.length" class="empty-state">No research tasks yet</div>
+                        <h4><i class="fas fa-history"></i> 研究历史</h4>
+                        <div v-if="!researchHistory.length" class="empty-state">暂无研究任务</div>
                         <div v-for="item in researchHistory" :key="item.execution_id" class="history-item" @click="loadResearch(item.execution_id)">
                             <div class="history-goal">{{ item.goal }}</div>
                             <div class="history-meta">
-                                <span class="status-badge" :class="item.status">{{ item.status }}</span>
+                                <span class="status-badge" :class="item.status">{{ tStatus(item.status) }}</span>
                                 <span>{{ item.created_at }}</span>
                             </div>
                         </div>

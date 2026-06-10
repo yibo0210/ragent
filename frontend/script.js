@@ -69,6 +69,13 @@ createApp({
             researchTimer: null,
             researchStartTime: null,
             researchElapsed: '0:00',
+            // Translations for research enums
+            sourceLabels: {
+                web_search: '网络搜索', graph_rag: '知识图谱', data_analyst: '数据分析',
+                internal_kb: '内部知识库', mcp: 'MCP', user_upload: '用户上传',
+            },
+            confidenceLabels: { high: '高', medium: '中', low: '低' },
+            statusLabels: { pending: '等待中', running: '运行中', completed: '已完成', failed: '失败', cancelled: '已取消' },
         };
     },
     mounted() {
@@ -79,6 +86,10 @@ createApp({
     },
 
     methods: {
+        // Translate research source/confidence/status
+        tSource(val) { return this.sourceLabels[val] || val; },
+        tConfidence(val) { return this.confidenceLabels[val] || val; },
+        tStatus(val) { return this.statusLabels[val] || val; },
         // Auth helper: common fetch with Authorization header
         _authFetch(url, options = {}) {
             const headers = options.headers || {};

@@ -12,38 +12,19 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from backend.research.schemas import ResearchPlan, ResearchTask
 
 
-_RESEARCH_PLANNER_PROMPT = """You are a research planning expert. Given a research goal, decompose it into a structured investigation plan.
+_RESEARCH_PLANNER_PROMPT = """Decompose a research goal into a DAG of tasks. Output ONLY JSON.
 
-Available research agents:
-- web: Web search for industry data, news, reports, market trends
-- graph: Knowledge graph exploration for entity relationships, multi-hop reasoning
-- data: SQL analysis for structured data, metrics, KPIs
-- internal_kb: Internal knowledge base search (documents, manuals, past research)
+Agents: web (search), graph (relationships), data (SQL), internal_kb (documents)
 
-Output ONLY valid JSON:
+JSON format:
 {
   "tasks": [
-    {
-      "task_id": "T1",
-      "name": "short task name",
-      "description": "what this task investigates",
-      "agent": "web|graph|data|internal_kb",
-      "query": "specific research question for the agent",
-      "dependencies": [],
-      "timeout": 60
-    }
+    {"task_id": "T1", "name": "...", "description": "...", "agent": "web|graph|data|internal_kb", "query": "...", "dependencies": [], "timeout": 60}
   ],
-  "reasoning": "brief explanation of the plan structure"
+  "reasoning": "..."
 }
 
-Rules:
-1. First tasks collect broad information (web search, internal KB) — NO dependencies
-2. Later tasks analyze and cross-reference (graph reasoning, data analysis) — depend on earlier results
-3. Final tasks synthesize and validate — depend on mid-stage results
-4. Tasks with NO dependencies run in PARALLEL
-5. Each task MUST target exactly ONE agent
-6. task_id format: T1, T2, T3, ...
-7. 3-8 tasks total depending on goal complexity
+Rules: no-dependency tasks run in parallel; chain sequential tasks via dependencies; 3-6 tasks total.
 """
 
 
@@ -51,9 +32,19 @@ class ResearchPlanner:
     """Converts a research goal into a ResearchPlan with DAG dependencies."""
 
     async def plan(self, goal: str) -> ResearchPlan:
-        from backend.agent.model_router import get_model_for_agent
+        from langchain.chat_models import init_chat_model
+        from backend.config import get_settings
+        settings = get_settings()
 
-        model = get_model_for_agent("supervisor")
+        model = init_chat_model(
+            model="qwen-turbo",
+            model_provider="openai",
+            api_key=settings.ark_api_key,
+            base_url=settings.base_url,
+            temperature=0.0,
+            max_tokens=1024,
+            timeout=60,
+        )
         response = await model.ainvoke([
             SystemMessage(content=_RESEARCH_PLANNER_PROMPT),
             HumanMessage(content=f"Research goal: {goal}\n\nGenerate research plan:"),

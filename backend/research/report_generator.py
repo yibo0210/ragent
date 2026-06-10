@@ -16,7 +16,9 @@ class ResearchReportGenerator:
         self, state: ResearchState, tenant_id: int, user_id: int,
     ) -> dict:
         """Generate a markdown research report with evidence bindings."""
-        from backend.agent.model_router import get_model_for_agent
+        from langchain.chat_models import init_chat_model
+        from backend.config import get_settings
+        settings = get_settings()
 
         plan = state.plan
         if not plan:
@@ -42,7 +44,15 @@ class ResearchReportGenerator:
                     tasks_summary += f"> Source: {ev.citation}\n"
 
         # Generate full report via LLM
-        model = get_model_for_agent("supervisor")
+        model = init_chat_model(
+            model="qwen-turbo",
+            model_provider="openai",
+            api_key=settings.ark_api_key,
+            base_url=settings.base_url,
+            temperature=0.0,
+            max_tokens=4096,
+            timeout=60,
+        )
         from langchain_core.messages import SystemMessage, HumanMessage
 
         import json

@@ -47,8 +47,18 @@ Rules:
 
 
 def _get_model():
-    from backend.agent.model_router import get_model_for_agent
-    return get_model_for_agent("supervisor")
+    from langchain.chat_models import init_chat_model
+    from backend.config import get_settings
+    settings = get_settings()
+    return init_chat_model(
+        model="qwen-turbo",
+        model_provider="openai",
+        api_key=settings.ark_api_key,
+        base_url=settings.base_url,
+        temperature=0.0,
+        max_tokens=1024,
+        timeout=60,
+    )
 
 
 def _format_previous_results(task_results: dict[str, dict]) -> str:

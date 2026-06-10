@@ -62,8 +62,14 @@ class WorkflowPlanner:
 
     def _get_model(self):
         if self._model is None:
-            from backend.agent.model_router import get_model_for_agent
-            self._model = get_model_for_agent("supervisor")
+            from langchain.chat_models import init_chat_model
+            from backend.config import get_settings
+            settings = get_settings()
+            self._model = init_chat_model(
+                model="qwen-turbo", model_provider="openai",
+                api_key=settings.ark_api_key, base_url=settings.base_url,
+                temperature=0.0, max_tokens=1024, timeout=60,
+            )
         return self._model
 
     async def plan(

@@ -47,9 +47,14 @@ def _make_agent_invoke(agent_name: str):
         previous_results: dict | None = None,
     ) -> ToolResult:
         try:
-            from backend.agent.model_router import get_model_for_agent
-
-            model = get_model_for_agent(agent_name)
+            from langchain.chat_models import init_chat_model
+            from backend.config import get_settings
+            settings = get_settings()
+            model = init_chat_model(
+                model="qwen-turbo", model_provider="openai",
+                api_key=settings.ark_api_key, base_url=settings.base_url,
+                temperature=0.0, max_tokens=1024, timeout=60,
+            )
             ctx = _build_contextual_prompt(agent_name, query, previous_results)
 
             messages = [

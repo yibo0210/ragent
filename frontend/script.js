@@ -107,15 +107,6 @@ createApp({
                     del: () => this.deleteSession(s.session_id),
                 });
             });
-            (this.wfHistory || []).forEach(w => {
-                items.push({
-                    type: 'workflow', id: w.execution_id,
-                    title: w.goal || '工作流',
-                    timestamp: w.created_at || '',
-                    action: () => this._loadWorkflowDetail(w.execution_id),
-                    del: () => this._deleteWorkflow(w.execution_id),
-                });
-            });
             (this.researchHistory || []).forEach(r => {
                 items.push({
                     type: 'research', id: r.execution_id,
@@ -131,16 +122,11 @@ createApp({
     },
 
     methods: {
-        // Load workflow + research history for sidebar
+        // Load research history for sidebar
         async _loadAllHistory() {
             try {
-                const [wfR, rsR] = await Promise.all([
-                    this._authFetch('/workflows'),
-                    this._authFetch('/research/list'),
-                ]);
-                const wfData = await wfR.json();
+                const rsR = await this._authFetch('/research/list');
                 const rsData = await rsR.json();
-                this.wfHistory = wfData.executions || [];
                 this.researchHistory = rsData.executions || [];
             } catch (e) { /* ignore */ }
         },

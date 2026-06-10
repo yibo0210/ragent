@@ -25,18 +25,20 @@
 18. [Agent Workflow Platform (v16)](#18-agent-workflow-platform-v16)
 19. [Adaptive GraphRAG (v17)](#19-adaptive-graphrag-v17)
 22. [Graph Reasoning Engine (v18)](#20-graph-reasoning-engine-v18)
-23. [常见面试问题与回答](#21-常见面试问题与回答)
-23. [代码级深度追问](#21-代码级深度追问高频追问准备)
-24. [实战调试场景](#22-实战调试场景behavioral-questions)
-25. [系统设计追问](#23-系统设计追问system-design)
-26. [高频概念追问](#24-高频概念追问)
-27. [LLM 基础原理](#25-llm-基础原理必考)
-28. [Agent 架构模式](#26-agent-架构模式高频)
-29. [Embedding 模型原理](#27-embedding-模型原理必考)
-30. [高级 RAG 模式](#28-高级-rag-模式高频)
-31. [生产工程](#29-生产工程实战)
-32. [安全与防护](#30-安全与防护生产必问)
-33. [面试技巧总结](#31-面试技巧总结)
+23. [Memory Graph System (v19)](#21-memory-graph-system-v19)
+24. [Deep Research Engine (v20)](#22-deep-research-engine-v20)
+25. [常见面试问题与回答](#25-常见面试问题与回答)
+26. [代码级深度追问](#26-代码级深度追问高频追问准备)
+27. [实战调试场景](#27-实战调试场景behavioral-questions)
+28. [系统设计追问](#28-系统设计追问system-design)
+29. [高频概念追问](#29-高频概念追问)
+30. [LLM 基础原理](#30-llm-基础原理必考)
+31. [Agent 架构模式](#31-agent-架构模式高频)
+32. [Embedding 模型原理](#32-embedding-模型原理必考)
+33. [高级 RAG 模式](#33-高级-rag-模式高频)
+34. [生产工程](#34-生产工程实战)
+35. [安全与防护](#35-安全与防护生产必问)
+36. [面试技巧总结](#36-面试技巧总结)
 
 ---
 
@@ -1638,10 +1640,49 @@ Vue 3 实现的完整工作流界面：
 
 ---
 
+## 22. Deep Research Engine (v20)
+
+### 22.1 一句话总结
+
+> "v20 将 Ragent AI 从 Question→Answer 问答助手升级为 Goal→Plan→Evidence→Review→Report 的自主研究平台。核心创新：ResearchPlanner 将研究目标通过 LLM 拆解为 DAG 执行计划（3~6 子任务含依赖关系），ResearchExecutor 按依赖关系串行/并行调度 4 个 ResearchAgent 收集结构化 Evidence，Reviewer 用 4 维加权评分评估证据充分性，GapAnalyzer 自动生成补充检索形成 Collect→Review→Gap→Collect 自纠错循环（max 3 rounds），最终生成证据驱动中文研究报告。前端新增 Research Workspace 标签页（进度实时监控 + 证据卡片 + 报告阅读 + 历史回溯）。16 测试全绿。"
+
+### 22.2 核心技术点
+
+**研究与普通问答的本质区别：**
+- 问答：User Question → Supervisor Route → Single Agent → Answer（单轮，5~15 秒）
+- 研究：Research Goal → Planner → DAG Plan → Multi-Agent Collection → Evidence Review → Gap Analysis → Report（多轮，~60 秒）
+
+**证据系统设计：**
+- 不再是 Agent 返回答案，而是返回结构化 Evidence（id, source, content, citation, confidence）
+- EvidenceStore 统一持久化，支持按 task/execution 查询 + 来源/置信度/覆盖率统计
+- Reviewer 用纯启发式 4 维评分（零 LLM 调用）：覆盖率 35% + 多样性 20% + 引用 25% + 置信度 20%
+
+**DAG 执行与进度持久化：**
+- 无依赖 task 自动并行（asyncio.gather），有依赖 task 等待前序完成
+- 每批 task 完成后立即写 MySQL，前端 3 秒轮询实时显示进度
+- asyncio.create_task 替代 FastAPI BackgroundTasks 确保后台任务可靠调度
+
+**性能优化 (74s → 6.6s, 11x)：**
+- qwen-turbo 替代 qwen-plus（响应快 5 倍）
+- max_tokens 8192 → 1024（API 处理时间大幅缩短）
+- 系统提示词从 30 行压缩到 10 行中文短提示
+
+### 22.3 面试追问准备
+
+**Q: 研究和普通问答有什么区别？**
+A: Chat 是单轮路由（Supervisor → Agent → Answer），Research 是多轮自主调查。关键差异是引入了证据（Evidence）中间层——Agent 产出证据、Reviewer 评估证据、Report 基于证据，保证结论可追溯可验证。
+
+**Q: 如何处理任务依赖关系？**
+A: 每个 ResearchTask 声明 。Executor while 循环每轮找出依赖已满足的 task，asyncio.gather 并行执行。天然支持串行链和并行分支。
+
+**Q: 如何防止无限循环？**
+A: Reviewer 评分 + max 3 rounds 硬限制。评分 ≥ 0.70 或 GapAnalyzer 找不到新缺口即终止。单 task 60s 超时。
+
+**Q: 怎么把速度从 74 秒优化到 6.6 秒？**
+A: (1) qwen-turbo 更快 (2) max_tokens 8192→1024 (3) 精简中文提示词。独立模型实例，不复用全局配置。
 
 
-
-## 22. 常见面试问题与回答
+## 25. 常见面试问题与回答
 
 ### Q1: 介绍一下你的项目？
 
@@ -1889,7 +1930,7 @@ RAG = Retrieval Augmented Generation，检索增强生成。核心思想是**让
 
 ---
 
-## 23. 代码级深度追问（高频追问准备）
+## 26. 代码级深度追问（高频追问准备）
 
 ### Q16: Supervisor 的 JSON 解析是怎么做的？为什么不用 with_structured_output？
 
@@ -2191,7 +2232,7 @@ graph.add_edge("data_analyst", END)   # 跳过 critique
 
 ---
 
-## 24. 实战调试场景（Behavioral Questions）
+## 27. 实战调试场景（Behavioral Questions）
 
 ### Q24: 如果用户反馈"回答不准确"，你怎么排查？
 
@@ -2264,7 +2305,7 @@ graph.add_edge("data_analyst", END)   # 跳过 critique
 
 ---
 
-## 25. 系统设计追问（System Design）
+## 28. 系统设计追问（System Design）
 
 ### Q27: 如果让你重新设计这个系统，你会做什么不同的决定？
 
@@ -2307,7 +2348,7 @@ graph.add_edge("data_analyst", END)   # 跳过 critique
 
 ---
 
-## 26. 高频概念追问
+## 29. 高频概念追问
 
 ### Q30: RRF 和 BM25 的区别？
 
@@ -2383,7 +2424,7 @@ log.info("user_logged_in", user_id=123)
 
 ---
 
-## 27. LLM 基础原理（必考）
+## 30. LLM 基础原理（必考）
 
 ### Q35: Transformer 的核心机制是什么？
 
@@ -2473,7 +2514,7 @@ CoT Prompt：Q: 8+5×2=? A: 先算乘法 5×2=10，再算加法 8+10=18
 
 ---
 
-## 28. Agent 架构模式（高频）
+## 31. Agent 架构模式（高频）
 
 ### Q39: ReAct 模式是什么？你的系统和它有什么关系？
 
@@ -2588,7 +2629,7 @@ LangGraph 的 StateGraph 保证每个节点的执行是原子性的——一个�
 
 ---
 
-## 29. Embedding 模型原理（必考）
+## 32. Embedding 模型原理（必考）
 
 ### Q43: Embedding 模型是怎么训练的？
 
@@ -2648,7 +2689,7 @@ sparse_embedding = embedding_service.get_sparse_embedding(query)  # BM25
 
 ---
 
-## 30. 高级 RAG 模式（高频）
+## 33. 高级 RAG 模式（高频）
 
 ### Q46: Corrective RAG (CRAG) 是什么？你的系统有类似机制吗？
 
@@ -2726,7 +2767,7 @@ Adaptive RAG 根据查询特征动态调整检索策略：
 
 ---
 
-## 31. 生产工程（实战）
+## 34. 生产工程（实战）
 
 ### Q50: 如何控制 LLM API 成本？
 
@@ -2809,7 +2850,7 @@ Critique：~1000 tokens（verification）
 
 ---
 
-## 32. 安全与防护（生产必问）
+## 35. 安全与防护（生产必问）
 
 ### Q53: 如何防止 Agent 执行危险操作？
 
@@ -2861,7 +2902,7 @@ Critique：~1000 tokens（verification）
 
 ---
 
-## 33. 面试技巧总结
+## 36. 面试技巧总结
 
 ### 回答问题的 STAR 框架
 

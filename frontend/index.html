@@ -749,6 +749,35 @@
                 </div>
             </div>
         </div>
+
+        <!-- History Detail Modal -->
+        <div v-if="historyModal" class="confirm-overlay" @click.self="historyModal = null">
+            <div class="history-detail-modal">
+                <div class="history-detail-header">
+                    <h3><i class="fas fa-flask"></i> {{ historyModal.title }}</h3>
+                    <button class="icon-btn" @click="historyModal = null"><i class="fas fa-xmark"></i></button>
+                </div>
+                <div class="history-detail-body">
+                    <!-- Evidence -->
+                    <div v-if="historyModal.evidence.length" class="history-detail-section">
+                        <h4><i class="fas fa-search"></i> 证据 ({{ historyModal.evidence.length }})</h4>
+                        <div v-for="ev in historyModal.evidence" :key="ev.id" class="evidence-card" :class="'confidence-' + ev.confidence">
+                            <div class="evidence-header">
+                                <span class="evidence-source">{{ tSource(ev.source) }}</span>
+                                <span class="evidence-confidence">{{ tConfidence(ev.confidence) }}</span>
+                            </div>
+                            <div class="evidence-content">{{ ev.content }}</div>
+                            <div class="evidence-citation" v-if="ev.citation"><i class="fas fa-link"></i> {{ ev.citation }}</div>
+                        </div>
+                    </div>
+                    <!-- Report -->
+                    <div v-if="historyModal.report" class="history-detail-section">
+                        <h4><i class="fas fa-file-alt"></i> 研究报告</h4>
+                        <div class="report-content markdown-body" v-html="renderMarkdown(historyModal.report)"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
     <script src="script.js?v=v20r3"></script>
 </body>

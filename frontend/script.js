@@ -78,6 +78,8 @@ createApp({
             statusLabels: { pending: '等待中', running: '运行中', completed: '已完成', failed: '失败', cancelled: '已取消' },
             // History filter
             historyFilter: 'all',
+            // History detail modal
+            historyModal: null,
             // v21: Dynamic Research
             researchHypotheses: [],
             researchConflicts: [],
@@ -119,7 +121,7 @@ createApp({
                     type: 'research', id: r.execution_id,
                     title: r.goal || '研究任务',
                     timestamp: r.created_at || '',
-                    action: () => { this.activeNav = 'research'; this.loadResearch(r.execution_id); },
+                    action: () => this.loadResearch(r.execution_id),
                     del: () => this._deleteResearch(r.execution_id),
                 });
             });
@@ -1165,19 +1167,24 @@ createApp({
         },
 
         async loadResearch(executionId) {
-            // Load completed research: only show evidence + report, skip active flow
-            this.researchRunning = false;
-            this.researchHypotheses = [];
-            this.researchConflicts = [];
-            this.evidenceGraphData = { nodes: [], edges: [] };
+            // Popup modal: only evidence + report, no page navigation
             try {
-                const resp = await this._authFetch('/research/' + executionId);
-                const data = await resp.json();
-                this.researchState = data;
-                if (data.status === 'completed') {
-                    await this._loadResearchEvidence(executionId);
-                    await this._loadResearchReport(executionId);
-                }
+                const [statusR, evR, rptR] = await Promise.all([
+                    this._authFetch('/research/' + executionId),
+                    this._authFetch('/research/' + executionId + '/evidence'),
+                    this._authFetch('/research/' + executionId + '/report?format=markdown'),
+                ]);
+                const status = await statusR.json();
+                const evidence = await evR.json();
+                const report = await rptR.json();
+                this.historyModal = {
+                    type: 'research',
+                    title: status.goal || '研究任务',
+                    status: status.status,
+                    evidence: evidence.evidence || [],
+                    report: report.content || '',
+                    report_title: report.title || '',
+                };
             } catch (e) { /* ignore */ }
         },
 

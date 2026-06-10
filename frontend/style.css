@@ -538,6 +538,21 @@ body {
 .confirm-ok { background: var(--danger); color: white; border: none; }
 .confirm-ok:hover { opacity: 0.9; }
 
+/* History Detail Modal */
+.history-detail-modal {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 16px; max-width: 780px; width: 95%; max-height: 85vh;
+  display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0,0,0,0.15);
+}
+.history-detail-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 20px 24px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.history-detail-header h3 { font-size: 18px; font-weight: 700; margin: 0; }
+.history-detail-body { flex: 1; overflow-y: auto; padding: 20px 24px; }
+.history-detail-section { margin-bottom: 20px; }
+.history-detail-section h4 { font-size: 15px; font-weight: 700; margin: 0 0 12px; color: var(--text-main); }
+
 /* ================= Message Actions ================= */
 .msg-actions { display: flex; gap: 4px; margin-top: 6px; opacity: 0; transition: opacity 0.2s; }
 .msg-bot:hover .msg-actions { opacity: 1; }

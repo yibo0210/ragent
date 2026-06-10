@@ -959,10 +959,10 @@ body {
 
 /* ================= v20 Research Workspace ================= */
 .research-view {
-  flex: 1; overflow-y: auto; padding: 40px 48px;
+  flex: 1; min-height: 0; overflow-y: auto; padding: 40px 48px;
   background: linear-gradient(180deg, var(--bg-page) 0%, var(--bg) 100%);
 }
-.research-workspace { max-width: 960px; margin: 0 auto; }
+.research-workspace { max-width: 960px; margin: 0 auto; min-height: 100%; }
 
 /* --- Page header --- */
 .research-container .research-nav {

@@ -65,7 +65,7 @@
                 </button>
             </div>
 
-            <!-- History List (always visible in sidebar) -->
+            <!-- Unified History (chat + workflow + research) -->
             <div class="sidebar-history">
                 <div class="history-section-label">
                     <span class="nav-label">历史记录</span>
@@ -77,19 +77,21 @@
                             <div class="skeleton skeleton-text" style="flex:1"></div>
                         </div>
                     </div>
-                    <div v-else-if="sessions.length === 0" class="history-empty">
+                    <div v-else-if="combinedHistory.length === 0" class="history-empty">
                         <span class="nav-label">暂无历史</span>
                     </div>
                     <div
-                        v-for="session in sessions"
-                        :key="session.session_id"
+                        v-for="item in combinedHistory"
+                        :key="item.type + '_' + item.id"
                         class="history-item"
-                        :class="{active: session.session_id === sessionId}"
-                        @click="loadSession(session.session_id)"
+                        :class="{active: item.type === 'chat' && item.id === sessionId}"
+                        @click="item.action()"
                     >
-                        <i class="fas fa-message"></i>
-                        <span class="history-title nav-label">{{ session.first_message || session.session_id }}</span>
-                        <button class="history-delete" @click.stop="deleteSession(session.session_id)" title="删除">
+                        <i v-if="item.type === 'chat'" class="fas fa-message"></i>
+                        <i v-else-if="item.type === 'workflow'" class="fas fa-diagram-project"></i>
+                        <i v-else-if="item.type === 'research'" class="fas fa-flask"></i>
+                        <span class="history-title nav-label">{{ item.title }}</span>
+                        <button v-if="item.type === 'chat'" class="history-delete" @click.stop="item.del()" title="删除">
                             <i class="fas fa-trash-can"></i>
                         </button>
                     </div>

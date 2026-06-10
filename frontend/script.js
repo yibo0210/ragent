@@ -87,10 +87,57 @@ createApp({
         document.documentElement.setAttribute('data-theme', this.theme);
         this.configureMarked();
         this.setupCodeCopyListener();
-        if (this.authToken) this.loadSessions();
+        if (this.authToken) { this.loadSessions(); this._loadAllHistory(); }
+    },
+
+    computed: {
+        // Merge sessions, workflows, research into unified sidebar history
+        combinedHistory() {
+            const items = [];
+            (this.sessions || []).forEach(s => {
+                items.push({
+                    type: 'chat', id: s.session_id,
+                    title: s.first_message || s.session_id || '新对话',
+                    timestamp: s.updated_at || s.created_at || '',
+                    action: () => this.loadSession(s.session_id),
+                    del: () => this.deleteSession(s.session_id),
+                });
+            });
+            (this.wfHistory || []).forEach(w => {
+                items.push({
+                    type: 'workflow', id: w.execution_id,
+                    title: w.goal || '工作流',
+                    timestamp: w.created_at || '',
+                    action: () => { this.activeNav = 'workflow'; this.wfLoadHistory(); },
+                });
+            });
+            (this.researchHistory || []).forEach(r => {
+                items.push({
+                    type: 'research', id: r.execution_id,
+                    title: r.goal || '研究任务',
+                    timestamp: r.created_at || '',
+                    action: () => { this.activeNav = 'research'; this.loadResearch(r.execution_id); },
+                });
+            });
+            items.sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''));
+            return items;
+        },
     },
 
     methods: {
+        // Load workflow + research history for sidebar
+        async _loadAllHistory() {
+            try {
+                const [wfR, rsR] = await Promise.all([
+                    this._authFetch('/workflows'),
+                    this._authFetch('/research/list'),
+                ]);
+                const wfData = await wfR.json();
+                const rsData = await rsR.json();
+                this.wfHistory = wfData.executions || [];
+                this.researchHistory = rsData.executions || [];
+            } catch (e) { /* ignore */ }
+        },
         // Translate research source/confidence/status
         tSource(val) { return this.sourceLabels[val] || val; },
         tConfidence(val) { return this.confidenceLabels[val] || val; },

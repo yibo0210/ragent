@@ -30,9 +30,6 @@
                     <div class="logo-icon"><img src="logo.svg" alt="Ragent"></div>
                     <span class="brand-text">Ragent</span>
                 </div>
-                <button class="icon-btn sidebar-toggle" @click="sidebarCollapsed = !sidebarCollapsed" title="收起侧边栏">
-                    <i class="fas fa-bars"></i>
-                </button>
             </div>
 
             <!-- New Chat Button -->
@@ -99,6 +96,11 @@
             </div>
 
         </aside>
+
+        <!-- Sidebar toggle (GPT-style: always visible, floats at edge) -->
+        <button class="sidebar-toggle-btn" @click="sidebarCollapsed = !sidebarCollapsed" :title="sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'">
+            <i class="fas" :class="sidebarCollapsed ? 'fa-chevron-right' : 'fa-chevron-left'"></i>
+        </button>
 
         <!-- Main Area -->
         <main class="main-content">

@@ -44,7 +44,7 @@ class ResearchExecutor:
 
         try:
             # --- Phase 1: Initial evidence collection ---
-            await self._execute_all_tasks(state, tenant_id, user_id)
+            await self._execute_all_tasks(state, tenant_id, user_id, db_record_id)
 
             # --- Phase 2: Review -> Gap -> Collect loop ---
             max_rounds = self._settings.research_max_review_rounds
@@ -97,7 +97,7 @@ class ResearchExecutor:
         return state
 
     async def _execute_all_tasks(
-        self, state: ResearchState, tenant_id: int, user_id: int,
+        self, state: ResearchState, tenant_id: int, user_id: int, db_record_id: int,
     ) -> None:
         """Execute tasks respecting DAG dependencies (parallel where possible)."""
         plan = state.plan
@@ -141,6 +141,7 @@ class ResearchExecutor:
 
             state.progress = (len(completed) / total_tasks) * 80.0  # 80% for collection
             state.completed_tasks = list(completed)
+            self._update_execution_record(db_record_id, state)  # persist progress immediately
 
     async def _execute_single_task(
         self,

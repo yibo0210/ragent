@@ -1232,7 +1232,21 @@ This will:
 - [x] Report Generator: 证据驱动中文研究报告（Markdown/PDF/PPTX），每条结论绑定 Evidence ID
 - [x] Research API: /research/create/status/evidence/report/cancel/list 全链路
 - [x] Frontend Research Workspace: 进度实时监控 + 证据卡片查看 + 报告阅读 + 历史回溯
-- [x] 16 tests passing (schemas + reviewer + gap_analyzer + evidence_store + planner + executor)
+- [x] 性能优化: qwen-turbo + max_tokens=1024 + 精简中文提示词，Planner 74s→6.6s（11x）
+- [x] UI 升级: GPT 风格侧边栏收起、统一三面板大厂审美、类型筛选历史记录、弹出模态框查看结果
+- [x] 34 tests passing (16 research + 18 evidence_graph)
+
+### v21.0 — Dynamic Research Agent ✓
+
+- [x] Hypothesis Generator: LLM 从研究目标生成 2~4 个竞争性假设（H1/H2/H3），每个假设独立验证
+- [x] Evidence Graph: Neo4j 证据图谱（`:EvidenceNode` + `:SUPPORTS`/`:REFUTES` 关系），替代 v20 平面列表
+- [x] Conflict Detector: LLM 逐对比较跨假设证据，检测 factual/inferential/contextual 矛盾
+- [x] Question Expander: 从证据冲突和未验证假设自动生成追问，触发 Hypothesis→Evidence→Conflict→Question 动态循环
+- [x] Confidence Estimator: 多维度置信度评分（来源权威度 20% + 交叉验证 40% + 反驳惩罚 30% + 引用质量 10%）
+- [x] Executor 重构: 假设驱动动态循环——假设生成→证据收集→冲突检测→追问展开→再次收集
+- [x] 前端证据图谱可视化: Echarts 力导向图（绿色=高置信度，红线=证据矛盾）+ 假设卡片 + 矛盾告警
+- [x] 34 tests passing (16 v20 + 18 v21)
+- [x] **Workflow 合并入 Research**: 任务工作流页面移除，功能统一到研究工具（rag_specialist 真正调用 Milvus 检索）
 
 ### v7.x — Planned
 

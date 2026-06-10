@@ -103,7 +103,9 @@ v13: 增量图聚类引擎 — 文档摄入后自动触发局部补丁（新节�
 
 **Memory Graph System** (v19): 新增 `backend/memory/` 包。MemoryExtractor 在每次对话保存后通过 LLM 提取 Fact/Preference/Task/Relation 四种用户记忆，MemoryGraphStore 用 `MERGE (m:Memory)` 存入 Neo4j 并通过 `:MENTIONS` 关系链接知识图谱 Entity。MemoryImportance 用时间衰减（30天半衰期）+ 访问频次三维评分。MemoryRetriever 在 supervisor_node 检索前将用户记忆格式化为上下文注入 LLM prompt。通过 `memory_enabled` 配置开关控制，默认关闭。57 测试全绿。
 
-**Deep Research Engine** (v20): 新增 `backend/research/` 包。ResearchPlanner 将研究目标通过 LLM 拆解为 DAG 执行计划（3~6 子任务，含依赖关系），ResearchExecutor 按依赖关系串行/并行调度 4 个 ResearchAgent（Web/Graph/Data/Internal KB），所有 Agent 输出统一为 Evidence 存入 EvidenceStore。ResearchReviewer 用 4 维加权评分（覆盖率 35% + 多样性 20% + 引用 25% + 置信度 20%）评估证据充分性，GapAnalyzer 自动生成补充检索查询，形成 Collect→Review→Gap→Collect 循环（max 3 rounds）。最终由 ResearchReportGenerator 生成证据驱动中文研究报告（每条结论绑定 Evidence ID）。前端新增研究工作区标签页（进度实时监控 + 证据卡片 + 报告阅读 + 历史回溯）。使用 qwen-turbo + max_tokens=1024 优化 LLM 响应速度。16 测试全绿。
+**Deep Research Engine** (v20): 新增 `backend/research/` 包。ResearchPlanner 将研究目标通过 LLM 拆解为 DAG 执行计划（3~6 子任务，含依赖关系），ResearchExecutor 按依赖关系串行/并行调度 4 个 ResearchAgent（Web/Graph/Data/Internal KB），所有 Agent 输出统一为 Evidence 存入 EvidenceStore。ResearchReviewer 用 4 维加权评分评估证据充分性，GapAnalyzer 自动生成补充检索查询形成 Collect→Review→Gap→Collect 循环（max 3 rounds）。最终生成证据驱动中文研究报告。前端 Research Workspace 标签页。使用 qwen-turbo + max_tokens=1024 优化 LLM 速度（Planner 74s→6.6s，11x）。34 测试全绿。
+
+**Dynamic Research Agent** (v21): 在 v20 基础上新增 Hypothesis Engine、Evidence Graph、Conflict Detection、Question Expansion、Confidence Estimator 五大模块。升级为 Hypothesis→Evidence→Conflict→Question→Research 动态循环。HypothesisGenerator 生成 2~4 个竞争性假设，EvidenceGraph 将证据以 Neo4j `:EvidenceNode` + `:SUPPORTS`/`:REFUTES` 关系存储为图谱，ConflictDetector 用 LLM 逐对检测跨假设证据矛盾，QuestionExpander 从冲突/缺口生成追问。前端新增 Echarts 证据图谱可视化 + 假设卡片 + 矛盾告警。Workflow 页面合并入 Research。34 测试全绿。
 
 ### Key Files
 
@@ -215,8 +217,14 @@ v13: 增量图聚类引擎 — 文档摄入后自动触发局部补丁（新节�
 | `backend/research/reviewer.py` | ResearchReviewer: 4 维证据评分 (coverage/diversity/citation/confidence) |
 | `backend/research/gap_analyzer.py` | GapAnalyzer: LLM 缺失分析 → 补充检索查询 |
 | `backend/research/report_generator.py` | ResearchReportGenerator: 证据驱动中文报告生成 |
-| `backend/research/routes.py` | /research/* API 端点 (create/status/evidence/report/cancel/list) |
+| `backend/research/routes.py` | /research/* API 端点 (create/status/evidence/report/cancel/list/delete) |
+| `backend/research/hypothesis_generator.py` | v21: LLM 生成 2~4 竞争性假设 |
+| `backend/research/evidence_graph.py` | v21: Neo4j `:EvidenceNode` + `:SUPPORTS`/`:REFUTES` 图谱 |
+| `backend/research/conflict_detector.py` | v21: LLM 逐对检测证据矛盾 |
+| `backend/research/question_expander.py` | v21: 从冲突/缺口生成追问 |
+| `backend/research/confidence_estimator.py` | v21: 多维度置信度评分 |
 | `tests/test_research.py` | v20 研究引擎 16 个单元测试 |
+| `tests/test_evidence_graph.py` | v21 证据图谱 18 个单元测试 |
 | `tests/test_token_tracker.py` | Token usage + rate limiter tests |
 | `tests/test_rate_limiter.py` | Rate limiter + SLA rule tests |
 | `tests/test_audit.py` | Audit logger + context manager tests |
@@ -365,4 +373,12 @@ v13: 增量图聚类引擎 — 文档摄入后自动触发局部补丁（新节�
 - **v20 Report Generator**: `ResearchReportGenerator.generate()` 构建 evidence_by_task 索引 + task_results 摘要，调用 LLM 生成中文 Markdown 报告。`_extract_summary()` 用正则提取"摘要"段落。每条结论必须引用 Evidence ID。
 - **v20 Async Execution**: routes.py 使用 `asyncio.create_task()` 而非 FastAPI `BackgroundTasks` 启动后台研究任务——前者在当前 event loop 中可靠调度，后者在某些 Starlette 版本中可能不执行 async 任务。
 - **v20 Progress Persistence**: Executor 在 `_execute_all_tasks` 的 while 循环内每批任务完成后调用 `_update_execution_record()`，前端 3 秒轮询 `/research/{id}` 立即感知进度变化。
-- **v20 Model Optimization**: Research 模块使用独立 `init_chat_model("qwen-turbo", max_tokens=1024, timeout=60)` 而非全局 model_router (qwen-plus, max_tokens=8192, timeout=120)。Planner 74s → 6.6s (11x 提升)。Agent prompt 精简为中文短提示词。
+- **v20 Model Optimization**: Research/Workflow 模块使用独立 `init_chat_model("qwen-turbo", max_tokens=1024, timeout=60)` 而非全局 model_router。Planner 74s → 6.6s (11x)。所有系统提示词中文化。
+- **v21 Hypothesis Engine**: `HypothesisGenerator.generate()` 调用 turbo 模型生成 2~4 个互斥假设。每个假设有 `verification_tasks` 用于独立验证。
+- **v21 Evidence Graph**: 证据不再存 MySQL 平面列表，改为 Neo4j `(:EvidenceNode)` 节点 + `[:SUPPORTS]`/`[:REFUTES]` 关系。`EvidenceGraph.get_evidence_graph()` 返回 nodes+edges 供 Echarts 可视化。
+- **v21 Conflict Detection**: `ConflictDetector.detect_all_pairs()` 只比较跨假设证据对（不再 O(N²) 全对比），最多 10 个矛盾。每对调用一次 turbo 模型。
+- **v21 Question Expander**: `QuestionExpander.expand()` 接收 hypotheses + conflicts + verified 列表，LLM 分析后生成 `ExpandedQuestion` 列表（含 priority + target_hypothesis）。
+- **v21 Confidence Estimator**: 来源权威度（web=0.5, data=0.8）+ 交叉验证 boost + 反驳 penalty + 引用 bonus。`batch_estimate()` 根据 conflict_pairs 重新计算所有证据置信度。
+- **v21 Dynamic Loop**: Executor 在 Phase 1.5 插入 Hypothesis-Driven Loop：生成假设→构建图谱→检测冲突→展开追问→执行追问任务。`dynamic_round` 计数器控制（默认 max 2 轮）。
+- **v21 Frontend**: Echarts 力导向证据图谱（节点大小∝置信度，颜色绿/黄/红，红线=REFUTES，蓝线=SUPPORTS）。假设卡片 grid 布局，按 verified/supported/refuted 着色。冲突告警红色左边框。
+- **v21 Workflow merged**: Workflow 页面移除，功能合并到 Research。`rag_specialist` 和 `web_searcher` workflow tools 现在真正调用 Milvus/Tavily 检索（之前只是 LLM 伪装）。
